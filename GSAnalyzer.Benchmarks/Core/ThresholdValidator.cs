@@ -32,31 +32,24 @@ namespace GSAnalyzer.Benchmarks.Core
                     {
                         double meanMs = report.ResultStatistics.Mean / 1_000_000.0;
                         double errorMs = report.ResultStatistics.StandardError / 1_000_000.0;
-                        long allocatedBytes = report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase);
 
-                        logger.LogInformation("Validating Thresholds for: {TestName}", testName);
+                        long allocatedBytes = report.GcStats?.GetBytesAllocatedPerOperation(report.BenchmarkCase) ?? 0;
 
-                        // Validating Speed Limits
+                        logger.LogInformation("🔍 Validating Thresholds for: {TestName}", testName);
+
                         if (meanMs > limits.MaxMeanMs)
                         {
-                            logger.LogError(" SPEED FAIL] Mean: {MeanMs:F3} ms > Limit: {LimitMs} ms", meanMs, limits.MaxMeanMs);
+                            logger.LogError(" [SPEED FAIL] Mean: {MeanMs:F3} ms > Limit: {LimitMs} ms", meanMs, limits.MaxMeanMs);
                             isGlobalPass = false;
                         }
-                        else
-                        {
-                            logger.LogInformation(" [SPEED PASS] Mean: {MeanMs:F3} ms", meanMs);
-                        }
+                        else logger.LogInformation("[SPEED PASS] Mean: {MeanMs:F3} ms", meanMs);
 
-                        // Validating Memory Limits
                         if (allocatedBytes > limits.MaxAllocatedBytes)
                         {
                             logger.LogError("[MEMORY FAIL] Bytes: {AllocatedBytes} > Limit: {LimitBytes}", allocatedBytes, limits.MaxAllocatedBytes);
                             isGlobalPass = false;
                         }
-                        else
-                        {
-                            logger.LogInformation("[MEMORY PASS] Bytes: {AllocatedBytes}", allocatedBytes);
-                        }
+                        else logger.LogInformation("[MEMORY PASS] Bytes: {AllocatedBytes}", allocatedBytes);
                     }
                 }
             }
