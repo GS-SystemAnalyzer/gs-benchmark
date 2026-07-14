@@ -32,7 +32,7 @@ namespace GSAnalyzer.Benchmarks.Core
                     {
                         double meanMs = report.ResultStatistics.Mean / 1_000_000.0;
                         double errorMs = report.ResultStatistics.StandardError / 1_000_000.0;
-                        long allocatedBytes = report.GcStats.BytesAllocatedPerOperation;
+                        long allocatedBytes = report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase);
 
                         logger.LogInformation("Validating Thresholds for: {TestName}", testName);
 
