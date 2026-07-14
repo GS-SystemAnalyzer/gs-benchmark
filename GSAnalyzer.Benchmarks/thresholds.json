@@ -9,12 +9,12 @@
     "MaxErrorMs": 0.5,
     "MaxAllocatedBytes": 1024
   },
-  "CacheFootprintBenchmarks.MeasureCacheFootprint2": {
+  "CacheFootprintBenchmark.Footprint_FullStoragePipeline": {
     "MaxMeanMs": 100000.0,
     "MaxErrorMs": 100000.0,
     "MaxAllocatedBytes": 25000000
   },
-  "CacheFootprintBenchmarks.MeasureCacheFootprint1": {
+  "CacheFootprintBenchmark.ReturnToIdle_AfterClearCache": {
     "MaxMeanMs": 100000.0,
     "MaxErrorMs": 100000.0,
     "MaxAllocatedBytes": 2000000000
