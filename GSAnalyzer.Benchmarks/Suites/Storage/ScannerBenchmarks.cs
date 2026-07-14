@@ -4,16 +4,17 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
-using GSSystemAnalyzer.Engine; 
-using GSSystemAnalyzer.Hubs;       
-using GSSystemAnalyzer.Interfaces; 
+using GSSystemAnalyzer.Engine;
+using GSSystemAnalyzer.Hubs;
+using GSSystemAnalyzer.Interfaces;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
-namespace GSAnalyzer.Benchmarks
+namespace GSAnalyzer.Benchmarks.Suites.Storage
 {
-    [MemoryDiagnoser] 
+    [MemoryDiagnoser]
     public class ScannerBenchmarks
     {
         private DiskScannerEngine _scanner = null!;
@@ -24,12 +25,15 @@ namespace GSAnalyzer.Benchmarks
         [GlobalSetup]
         public void Setup()
         {
+            using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+            var setupLogger = loggerFactory.CreateLogger<ScannerBenchmarks>();
+
             _testDirectory = Path.Combine(Path.GetTempPath(), "GSAnalyzer_Benchmark_CI");
-            
+
             if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, true);
             Directory.CreateDirectory(_testDirectory);
 
-            Console.WriteLine("Generating 50,000 physical files for CI runner sandbox...");
+            setupLogger.LogInformation("Generating 50,000 physical files for CI runner sandbox...");
 
             int totalFolders = 500;
             int rootFolders = 5;
@@ -59,33 +63,31 @@ namespace GSAnalyzer.Benchmarks
             _testItems = dirInfo.GetFileSystemInfos().ToList();
             _scanId = Guid.NewGuid();
 
-            // --- Deep Mocking SignalR ---
-            var mockClientProxy = new Mock<IClientProxy>(); 
-            var mockClients = new Mock<IHubClients>();      
+            var mockClientProxy = new Mock<IClientProxy>();
+            var mockClients = new Mock<IHubClients>();
             mockClients.Setup(c => c.All).Returns(mockClientProxy.Object);
 
-            var mockHub = new Mock<IHubContext<SystemHub>>(); 
+            var mockHub = new Mock<IHubContext<SystemHub>>();
             mockHub.Setup(h => h.Clients).Returns(mockClients.Object);
 
-            // --- Mocking Settings ---
             var mockSettings = new Mock<ISettingService>();
-            mockSettings.Setup(s => s.Current).Returns(new GSSystemAnalyzer.Models.SettingDtos.AppSettingDto 
-            { 
-                Scan = new GSSystemAnalyzer.Models.SettingDtos.ScanSettingDto 
-                { 
-                    Depth = 10, 
-                    ExcludedPaths = new List<string>() 
-                } 
+            mockSettings.Setup(s => s.Current).Returns(new GSSystemAnalyzer.Models.SettingDtos.AppSettingDto
+            {
+                Scan = new GSSystemAnalyzer.Models.SettingDtos.ScanSettingDto
+                {
+                    Depth = 10,
+                    ExcludedPaths = new List<string>()
+                }
             });
 
-            var logger = NullLogger<DiskScannerEngine>.Instance;
-            _scanner = new DiskScannerEngine(mockHub.Object, mockSettings.Object, logger);
+            var engineLogger = NullLogger<DiskScannerEngine>.Instance;
+            _scanner = new DiskScannerEngine(mockHub.Object, mockSettings.Object, engineLogger);
         }
 
         [Benchmark]
         public async Task MeasureDiskScanner_CI()
         {
-            await _scanner.CalculateMissingSizesAsync(_testItems, _scanId); 
+            await _scanner.CalculateMissingSizesAsync(_testItems, _scanId);
         }
 
         [GlobalCleanup]

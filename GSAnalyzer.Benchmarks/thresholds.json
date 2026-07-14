@@ -1,0 +1,12 @@
+{
+  "ScannerBenchmarks.MeasureDiskScanner_CI": {
+    "MaxMeanMs": 15.0,
+    "MaxErrorMs": 2.0,
+    "MaxAllocatedBytes": 5000
+  },
+  "RamMonitoringBenchmarks.MeasureUsage": {
+    "MaxMeanMs": 2.0,
+    "MaxErrorMs": 0.5,
+    "MaxAllocatedBytes": 1024
+  }
+}
