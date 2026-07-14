@@ -96,7 +96,7 @@ namespace GSAnalyzer.Benchmarks.Suites.Storage
                 }
             });
 
-            _engine = new DiskScannerEngine(mockHub.Object, mockSettings.Object, NullLogger.Instance);
+            _engine = new DiskScannerEngine(mockHub.Object, mockSettings.Object, NullLogger<DiskScannerEngine>.Instance);
             _fileTypeScanner = new FileTypeScanner(_engine, new MemoryCache(new MemoryCacheOptions()));
             _ageHeatmap = new AgeHeatmapEngine(_engine, new MemoryCache(new MemoryCacheOptions()));
 
