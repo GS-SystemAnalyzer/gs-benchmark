@@ -1,8 +1,7 @@
-﻿using System;
-
-public class Class1
+﻿namespace GSAnalyzer.Benchmarks.Suites.Processing
 {
-	public Class1()
-	{
-	}
+    public class CpuLoadBenchmarks
+    {
+        // Placeholder for future CPU tests
+    }
 }

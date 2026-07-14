@@ -1,8 +1,7 @@
-﻿using System;
-
-public class Class1
+﻿namespace GSAnalyzer.Benchmarks.Suites.Hardware
 {
-	public Class1()
-	{
-	}
+    public class ThermalBenchmarks
+    {
+        // Placeholder for future CPU tests
+    }
 }

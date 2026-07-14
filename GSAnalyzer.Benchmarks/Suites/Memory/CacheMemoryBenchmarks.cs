@@ -1,8 +1,7 @@
-﻿using System;
-
-public class Class1
+﻿namespace GSAnalyzer.Benchmarks.Suites.Memory
 {
-	public Class1()
-	{
-	}
+    public class CacheMemoryBenchmarks
+    {
+        // Placeholder for future cache tests
+    }
 }
