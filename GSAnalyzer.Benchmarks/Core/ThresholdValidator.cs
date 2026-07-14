@@ -26,7 +26,8 @@ namespace GSAnalyzer.Benchmarks.Core
             {
                 foreach (var report in summary.Reports)
                 {
-                    string testName = $"{summary.Title}.{report.BenchmarkCase.Descriptor.WorkloadMethod.Name}";
+                    // after — builds "CacheFootprintBenchmark.Footprint_FullStoragePipeline"
+                    string testName = $"{report.BenchmarkCase.Descriptor.Type.Name}.{report.BenchmarkCase.Descriptor.WorkloadMethod.Name}";
 
                     if (allThresholds != null && allThresholds.TryGetValue(testName, out var limits))
                     {
