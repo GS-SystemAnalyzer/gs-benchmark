@@ -135,6 +135,28 @@ no product coverage. The core repository's pinned benchmark caller is adopted
 separately; merely adding this workflow does not update that caller or branch
 protection.
 
+### Discord completion summaries
+
+`.github/workflows/benchmark-report.yml` sends one summary per completed
+`Benchmark harness contracts` attempt from pull requests, pushes, or manual
+dispatches. Set the repository Actions secret **`CI_BUILD`** to the Discord
+webhook URL. Repository secrets in `core` are not shared with this repository.
+The reporter must exist on the default branch (`main`) before GitHub activates
+its `workflow_run` trigger; adding it to a PR alone does not send notifications.
+
+Messages show the exact upstream conclusion, source repository/branch/commit,
+actor, run/attempt, and run/artifact-page link. Manual run labels include
+`aggregate probe=none|failure|skipped`, so intentional failures are identifiable.
+Timeouts and other non-success conclusions retain their exact label and use
+failure styling. These messages describe synthetic harness checks only.
+
+The reporter uses event metadata and does not check out PR code or download
+artifacts, including for fork PRs. A missing `CI_BUILD` produces a visible warning
+and failed reporter job; transport errors also fail that separate job. The
+benchmark aggregate and its acceptance result remain independent. Confirm the
+message in the intended Discord channel after activation; local payload checks
+and a successful action invocation alone do not establish channel delivery.
+
 Local CLI tests retain their owned `gs-cli-contract-<guid>` directory under the
 system temp directory and print its exact path in test output. All invoked
 workloads are synthetic; no legacy storage fixture is executed.
