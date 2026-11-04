@@ -2,19 +2,26 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.13.12" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
     <PackageReference Include="Moq" Version="4.20.72" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="$(CoreRepoPath)\backend\GSSystemAnalyzer.csproj" />
+    <None Update="thresholds.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\global.json" Link="global.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <AssemblyMetadata Include="BenchmarkTfm" Value="$(TargetFramework)" />
   </ItemGroup>
 
+  <Target Name="ValidateCoreRepoPath" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(CoreRepoPath)' == '' Or !Exists('$(CoreRepoPath)\backend\GSSystemAnalyzer.csproj')"
+           Text="Set CoreRepoPath to the absolute matching core checkout (also export it for BenchmarkDotNet child builds)." />
+  </Target>
 </Project>

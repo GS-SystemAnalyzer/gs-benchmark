@@ -1,22 +1,155 @@
 {
-  "ScannerBenchmarks.MeasureDiskScanner_CI": {
-    "MaxMeanMs": 15.0,
-    "MaxErrorMs": 2.0,
-    "MaxAllocatedBytes": 5000
-  },
-  "RamMonitoringBenchmarks.MeasureUsage": {
-    "MaxMeanMs": 2.0,
-    "MaxErrorMs": 0.5,
-    "MaxAllocatedBytes": 1024
-  },
-  "CacheFootprintBenchmark.Footprint_FullStoragePipeline": {
-    "MaxMeanMs": 100000.0,
-    "MaxErrorMs": 100000.0,
-    "MaxAllocatedBytes": 25000000
-  },
-  "CacheFootprintBenchmark.ReturnToIdle_AfterClearCache": {
-    "MaxMeanMs": 100000.0,
-    "MaxErrorMs": 100000.0,
-    "MaxAllocatedBytes": 2000000000
-  }
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "selftest-windows-pass", "purpose": "contract",
+      "types": ["GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessWindowsSmokeBenchmarks"],
+      "cases": [{
+        "identity": {
+          "type": "GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessWindowsSmokeBenchmarks", "method": "Allocate",
+          "parameters": {}, "job": "contract-net10-windows-x64", "runtime": ".NET 10.0", "tfm": "net10.0-windows", "architecture": "X64",
+          "scenario": "synthetic-allocation", "cache_topology": "none", "dataset_id": "synthetic-v1"
+        },
+        "required": true, "contract_checks": ["child_provenance", "allocation_control"],
+        "metrics": [
+          {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"synthetic observations only"},
+          {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"approved","owner":"harness allocation control, not product performance","lower":128,"upper":4096},
+          {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"no approved uncertainty budget"}
+        ]
+      }]
+    },
+    {
+      "id": "selftest-pass", "purpose": "contract",
+      "types": ["GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessSmokeBenchmarks"],
+      "cases": [{
+        "identity": {
+          "type": "GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessSmokeBenchmarks", "method": "Allocate",
+          "parameters": {}, "job": "contract-net10-x64", "runtime": ".NET 10.0", "tfm": "net10.0", "architecture": "X64",
+          "scenario": "synthetic-allocation", "cache_topology": "none", "dataset_id": "synthetic-v1"
+        },
+        "required": true, "contract_checks": ["child_provenance", "allocation_control"],
+        "metrics": [
+          {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"synthetic observations only"},
+          {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"approved","owner":"harness nonzero allocation control, not product performance","lower":128,"upper":4096},
+          {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"no approved uncertainty budget"}
+        ]
+      }]
+    },
+    {
+      "id": "selftest-allocation-fail", "purpose": "contract",
+      "types": ["GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessSmokeBenchmarks"],
+      "cases": [{
+        "identity": {
+          "type": "GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessSmokeBenchmarks", "method": "Allocate",
+          "parameters": {}, "job": "contract-net10-x64", "runtime": ".NET 10.0", "tfm": "net10.0", "architecture": "X64",
+          "scenario": "synthetic-allocation", "cache_topology": "none", "dataset_id": "synthetic-v1"
+        },
+        "required": true, "contract_checks": ["child_provenance", "allocation_control"],
+        "metrics": [
+          {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"synthetic observations only"},
+          {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"approved","owner":"intentional failing harness control","upper":1},
+          {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"no approved uncertainty budget"}
+        ]
+      }]
+    },
+    {
+      "id": "selftest-throw", "purpose": "contract",
+      "types": ["GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessThrowBenchmarks"],
+      "cases": [{
+        "identity": {
+          "type": "GSAnalyzer.Benchmarks.Suites.Diagnostics.HarnessThrowBenchmarks", "method": "Throw",
+          "parameters": {}, "job": "contract-net10-x64", "runtime": ".NET 10.0", "tfm": "net10.0", "architecture": "X64",
+          "scenario": "synthetic-throw", "cache_topology": "none", "dataset_id": "synthetic-v1"
+        },
+        "required": true, "contract_checks": ["child_provenance"],
+        "metrics": [
+          {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"intentional crashing harness control"},
+          {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"intentional crashing harness control"},
+          {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"no approved uncertainty budget"}
+        ]
+      }]
+    },
+    {
+      "id": "legacy-scanner", "purpose": "contract",
+      "types": ["GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks"],
+      "cases": [{
+        "identity": {
+          "type": "GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks", "method": "MeasureDiskScanner_CI",
+          "parameters": {}, "job": "legacy-net10-windows-x64", "runtime": ".NET 10.0", "tfm": "net10.0-windows", "architecture": "X64",
+          "scenario": "legacy-scanner", "cache_topology": "legacy-shared", "dataset_id": "legacy-storage-v1"
+        },
+        "required": true, "contract_checks": ["child_provenance", "owned_fixture"],
+        "metrics": [
+          {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 legacy mean, provisional after BDN migration","upper":15000000},
+          {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 legacy allocation, decimal bytes","upper":5000},
+          {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs was unenforced and is not migrated"}
+        ]
+      }]
+    },
+    {
+      "id": "legacy-footprint", "purpose": "contract",
+      "types": ["GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark"],
+      "cases": [
+        {
+          "identity": {
+            "type":"GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark","method":"Footprint_FullStoragePipeline",
+            "parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64",
+            "scenario":"legacy-pipeline","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"
+          },
+          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 decimal allocation bytes","upper":25000000},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+          ]
+        },
+        {
+          "identity": {
+            "type":"GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark","method":"ReturnToIdle_AfterClearCache",
+            "parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64",
+            "scenario":"legacy-clear","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"
+          },
+          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 allocation, not retained memory","upper":2000000000},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+          ]
+        }
+      ]
+    },
+    {
+      "id":"legacy-storage","purpose":"contract",
+      "types":["GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark"],
+      "cases":[
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"MeasureDiskScanner_CI","parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"legacy-scanner","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":15000000},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 decimal bytes","upper":5000},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+          ]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark","method":"Footprint_FullStoragePipeline","parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"legacy-pipeline","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 decimal bytes","upper":25000000},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+          ]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark","method":"ReturnToIdle_AfterClearCache","parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"legacy-clear","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 allocation, not retained memory","upper":2000000000},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+          ]
+        }
+      ]
+    }
+  ]
 }
