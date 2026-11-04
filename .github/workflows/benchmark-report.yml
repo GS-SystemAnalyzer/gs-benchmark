@@ -1,0 +1,51 @@
+name: Benchmark harness contracts (Discord)
+run-name: 'Benchmark notification | upstream run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}'
+
+on:
+  workflow_run:
+    workflows: [Benchmark harness contracts]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'push' ||
+      github.event.workflow_run.event == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HAS_DISCORD_WEBHOOK: ${{ secrets.CI_BUILD != '' }}
+    steps:
+      - name: Report missing Discord configuration
+        if: env.HAS_DISCORD_WEBHOOK != 'true'
+        shell: bash
+        run: |
+          echo '::warning::Discord notification unavailable: configure the CI_BUILD repository secret.'
+          echo 'Discord notification unavailable: CI_BUILD is missing. The upstream benchmark result is unchanged.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Notify Discord of the upstream result
+        if: env.HAS_DISCORD_WEBHOOK == 'true'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.CI_BUILD }}
+          status: ${{ github.event.workflow_run.conclusion == 'success' && 'success' || github.event.workflow_run.conclusion == 'cancelled' && 'cancelled' || 'failure' }}
+          title: 'Synthetic harness contracts: ${{ github.event.workflow_run.conclusion || ''unknown'' }}'
+          description: |
+            Repository: ${{ github.repository }}
+            Source: ${{ github.event.workflow_run.head_repository.full_name || 'unavailable' }} @ ${{ github.event.workflow_run.head_branch || 'unavailable' }}
+            Commit: ${{ github.event.workflow_run.head_sha || 'unavailable' }}
+            Event: ${{ github.event.workflow_run.event }}
+            Actor: ${{ github.event.workflow_run.triggering_actor.login || github.event.workflow_run.actor.login || 'unavailable' }}
+            Run: ${{ github.event.workflow_run.run_number || 'unavailable' }} (ID ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt || 'unavailable' }})
+            Run label (includes manual aggregate probe): ${{ github.event.workflow_run.display_title || 'unavailable' }}
+            Run / artifacts: ${{ github.event.workflow_run.html_url }}
+            Synthetic harness checks only; no product performance acceptance.
+          url: ${{ github.event.workflow_run.html_url }}
+          nocontext: true
+          nodetail: true
+          nofail: false

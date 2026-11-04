@@ -1,0 +1,108 @@
+name: Benchmark harness contracts
+run-name: 'Synthetic harness contracts | ${{ github.event_name }} | aggregate probe=${{ inputs.aggregate_probe || ''none'' }}'
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      aggregate_probe:
+        description: Deliberately fail or skip a required job to rehearse the aggregate
+        type: choice
+        default: none
+        options: [none, failure, skipped]
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-contracts:
+    if: ${{ inputs.aggregate_probe != 'skipped' }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CoreRepoPath: ${{ github.workspace }}\core
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: gs-benchmark
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gs-benchmark
+      - uses: actions/checkout@v4
+        with:
+          repository: GS-SystemAnalyzer/core
+          ref: d825fb7a20c1be86846f7528d1658c52118602d1
+          path: core
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.302
+      - name: Force Release builds
+        run: |
+          dotnet build GSAnalyzer.Benchmarks/GSAnalyzer.Benchmarks.csproj -c Release --no-incremental --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build GSAnalyzer.Benchmarks.Tests/GSAnalyzer.Benchmarks.Tests.csproj -c Release --no-incremental --nologo
+          exit $LASTEXITCODE
+      - name: Policy and real CLI contracts
+        env:
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+        run: |
+          dotnet test GSAnalyzer.Benchmarks.Tests/GSAnalyzer.Benchmarks.Tests.csproj -c Release --no-build --nologo --logger "trx;LogFileName=contracts.trx"
+          exit $LASTEXITCODE
+      - name: Rehearse an actual failed required job
+        if: ${{ inputs.aggregate_probe == 'failure' }}
+        run: exit 1
+      - name: Upload complete evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-contract-evidence
+          if-no-files-found: error
+          path: |
+            gs-benchmark/GSAnalyzer.Benchmarks.Tests/TestResults/
+            gs-benchmark/GSAnalyzer.Benchmarks/bin/Release/net10.0/runs/
+            ${{ runner.temp }}/gs-cli-contract-*/
+
+  negative-aggregate-rehearsal:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      CoreRepoPath: ${{ github.workspace }}\core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: GS-SystemAnalyzer/core
+          ref: d825fb7a20c1be86846f7528d1658c52118602d1
+          path: core
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.302
+      - shell: pwsh
+        run: |
+          dotnet build GSAnalyzer.Benchmarks/GSAnalyzer.Benchmarks.csproj -c Release -f net10.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($state in @('failure', 'cancelled', 'skipped', '')) {
+            dotnet run --project GSAnalyzer.Benchmarks/GSAnalyzer.Benchmarks.csproj -c Release -f net10.0 --no-build -- --aggregate "success,$state"
+            if ($LASTEXITCODE -ne 1) { throw "Aggregate accepted required state '$state'" }
+          }
+          dotnet run --project GSAnalyzer.Benchmarks/GSAnalyzer.Benchmarks.csproj -c Release -f net10.0 --no-build -- --aggregate "success,success"
+          exit $LASTEXITCODE
+
+  benchmark-contract-gate:
+    needs: [synthetic-contracts, negative-aggregate-rehearsal]
+    if: always()
+    runs-on: windows-latest
+    steps:
+      - name: Require every declared job
+        shell: pwsh
+        env:
+          CONTRACT_RESULT: ${{ needs.synthetic-contracts.result }}
+          REHEARSAL_RESULT: ${{ needs.negative-aggregate-rehearsal.result }}
+        run: |
+          foreach ($state in @($env:CONTRACT_RESULT, $env:REHEARSAL_RESULT)) {
+            if ($state -ne 'success') { throw "Required benchmark contract job did not pass: '$state'" }
+          }
