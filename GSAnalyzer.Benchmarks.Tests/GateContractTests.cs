@@ -273,17 +273,33 @@ public sealed class GateContractTests : IDisposable
     }
 
     [Fact]
-    public void CheckedInProfilesRemainIndependentAndLegacyCannotExecute()
+    public void CheckedInProfilesMatchTheExplicitStorageMigration()
     {
         var policy = ThresholdValidator.Read<BenchmarkPolicy>(Path.Combine(AppContext.BaseDirectory, "thresholds.json"));
         foreach (var profile in policy.Profiles)
         {
             ThresholdValidator.Profile(policy, profile.Id);
             var runs = BenchmarkResults.Discover(profile, Path.Combine(root, "discovery"));
+            Assert.All(runs.SelectMany(r => r.BenchmarksCases), c => Assert.True(c.Job.Environment.Runtime != null,
+                profile.Id + ": " + c.DisplayInfo));
             var ids = runs.SelectMany(r => r.BenchmarksCases).Select(BenchmarkResults.Identity).ToArray();
             Assert.Equal(profile.Cases.Select(c => c.Identity.Id).Order(), ids.Select(c => c.Id).Order());
-            if (profile.Id.StartsWith("legacy-")) Assert.All(runs, r => Assert.False(BenchmarkResults.CanExecute(r.Type)));
+            Assert.All(runs, r => Assert.True(BenchmarkResults.CanExecute(r.Type)));
         }
+        Assert.DoesNotContain(policy.Profiles, p => p.Id is "legacy-storage" or "legacy-scanner");
+        Assert.Equal(8, policy.Profiles.Single(p => p.Id == "storage-tiny").Cases.Length);
+        Assert.Equal(5, policy.Profiles.Single(p => p.Id == "storage-stages").Cases.Length);
+        Assert.Equal(2, policy.Profiles.Single(p => p.Id == "legacy-footprint").Cases.Length);
+        var tiny = policy.Profiles.Single(p => p.Id == "storage-tiny").Cases;
+        Assert.Equal((from method in new[] { "AppEmpty", "AppHit", "ChangedRescan", "PersistedRestore" }
+            from dataset in new[] { "tiny-v1", "tiny-unicode-v1" } select method + ":" + dataset).Order(),
+            tiny.Select(c => c.Identity.Method + ":" + c.Identity.DatasetId).Order());
+        Assert.Equal(new[] { "ClearAction", "ForcedGcRetention", "PassiveAfterProductGc", "PopulationRebuild", "WarmedAnalyzerHit" },
+            policy.Profiles.Single(p => p.Id == "storage-stages").Cases.Select(c => c.Identity.Method).Order());
+        Assert.Equal(new[] { "Footprint_FullStoragePipeline", "ReturnToIdle_AfterClearCache" },
+            policy.Profiles.Single(p => p.Id == "legacy-footprint").Cases.Select(c => c.Identity.Method).Order());
+        Assert.False(BenchmarkResults.CanExecute(typeof(ConstructorTrap)));
+        Assert.False(BenchmarkResults.CanExecute(typeof(GateFixture)));
     }
 
     [Theory]
@@ -436,7 +452,8 @@ public sealed class CliContractTests(Xunit.Abstractions.ITestOutputHelper output
         Assert.Contains("Build failed", await Gate("child-build", project, "selftest-pass", 1, "--selftest-build-failure"));
         await Gate("missing-config", unrelated, "selftest-pass", 1, "--config", Path.Combine(evidence, "absent.json"));
         await Gate("empty-filter", unrelated, "selftest-pass", 1, "--filter", "*Absent*");
-        await Gate("unsafe-legacy", project, "legacy-storage", 1);
+        Assert.Contains("Unknown profile", await Gate("retired-legacy", project, "legacy-storage", 1));
+        Assert.Contains("different parent target framework", await Gate("storage-target", project, "storage-tiny", 1));
         await Gate("read-only", unrelated, "selftest-pass", 0, "--evidence", firstRoot,
             "--manifest-sha", BenchmarkResults.Hash(Path.Combine(firstRoot, "manifest.json")));
 

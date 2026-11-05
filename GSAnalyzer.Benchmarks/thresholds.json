@@ -70,21 +70,82 @@
       }]
     },
     {
-      "id": "legacy-scanner", "purpose": "contract",
+      "id": "storage-tiny", "purpose": "performance",
       "types": ["GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks"],
-      "cases": [{
-        "identity": {
-          "type": "GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks", "method": "MeasureDiskScanner_CI",
-          "parameters": {}, "job": "legacy-net10-windows-x64", "runtime": ".NET 10.0", "tfm": "net10.0-windows", "architecture": "X64",
-          "scenario": "legacy-scanner", "cache_topology": "legacy-shared", "dataset_id": "legacy-storage-v1"
+      "cases": [
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"AppEmpty","parameters":{"parameter:Dataset":"System.String:\"tiny-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"app_empty/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"app-empty service scan"}]
         },
-        "required": true, "contract_checks": ["child_provenance", "owned_fixture"],
-        "metrics": [
-          {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 legacy mean, provisional after BDN migration","upper":15000000},
-          {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 legacy allocation, decimal bytes","upper":5000},
-          {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs was unenforced and is not migrated"}
-        ]
-      }]
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"AppHit","parameters":{"parameter:Dataset":"System.String:\"tiny-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"app_hit/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"app-hit service scan"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"ChangedRescan","parameters":{"parameter:Dataset":"System.String:\"tiny-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"changed_rescan/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"targeted invalidation service scan"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"PersistedRestore","parameters":{"parameter:Dataset":"System.String:\"tiny-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"persisted_restore/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"fresh constructor restore"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"AppEmpty","parameters":{"parameter:Dataset":"System.String:\"tiny-unicode-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"app_empty/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-unicode-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"Unicode app-empty service scan"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"AppHit","parameters":{"parameter:Dataset":"System.String:\"tiny-unicode-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"app_hit/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-unicode-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"Unicode app-hit service scan"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"ChangedRescan","parameters":{"parameter:Dataset":"System.String:\"tiny-unicode-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"changed_rescan/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-unicode-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"Unicode targeted rescan"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"PersistedRestore","parameters":{"parameter:Dataset":"System.String:\"tiny-unicode-v1\""},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"persisted_restore/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-unicode-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"Unicode fresh constructor restore"}]
+        }
+      ]
     },
     {
       "id": "legacy-footprint", "purpose": "contract",
@@ -113,41 +174,65 @@
           "metrics":[
             {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
             {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 allocation, not retained memory","upper":2000000000},
+            {"metric":"managed_residual","unit":"B","direction":"lower","statistic":"max_signed_delta","required":true,"budget_status":"approved","owner":"legacy managed residual only","upper":12000000},
             {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
           ]
         }
       ]
     },
     {
-      "id":"legacy-storage","purpose":"contract",
-      "types":["GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark"],
+      "id":"storage-stages","purpose":"performance",
+      "types":["GSAnalyzer.Benchmarks.Suites.Memory.CacheMemoryBenchmarks"],
       "cases":[
         {
-          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.ScannerBenchmarks","method":"MeasureDiskScanner_CI","parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"legacy-scanner","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"},
-          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Memory.CacheMemoryBenchmarks","method":"PopulationRebuild","parameters":{},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"app_empty/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
           "metrics":[
-            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":15000000},
-            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 decimal bytes","upper":5000},
-            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"population stage"}
           ]
         },
         {
-          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark","method":"Footprint_FullStoragePipeline","parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"legacy-pipeline","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"},
-          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Memory.CacheMemoryBenchmarks","method":"WarmedAnalyzerHit","parameters":{},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"analyzer_hit/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
           "metrics":[
-            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
-            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 decimal bytes","upper":25000000},
-            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"warmed analyzer stage"}
           ]
         },
         {
-          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Storage.CacheFootprintBenchmark","method":"ReturnToIdle_AfterClearCache","parameters":{},"job":"legacy-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"legacy-clear","cache_topology":"legacy-shared","dataset_id":"legacy-storage-v1"},
-          "required":true,"contract_checks":["child_provenance","owned_fixture"],
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Memory.CacheMemoryBenchmarks","method":"ClearAction","parameters":{},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"clear_action/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
           "metrics":[
-            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"historical","owner":"bba4547 provisional legacy mean","upper":100000000000},
-            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"historical","owner":"bba4547 allocation, not retained memory","upper":2000000000},
-            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"old MaxErrorMs not migrated"}
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"product ClearCache wall time includes product GC"}
           ]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Memory.CacheMemoryBenchmarks","method":"PassiveAfterProductGc","parameters":{},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"passive_after_product_gc/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"whole diagnostic time"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"whole diagnostic allocations"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"100ms observation after product-forced GC"},
+            {"metric":"managed_residual","unit":"B","direction":"lower","statistic":"max_signed_delta","required":true,"budget_status":"tbd","owner":"post-product-GC minus populated baseline"}]
+        },
+        {
+          "identity":{"type":"GSAnalyzer.Benchmarks.Suites.Memory.CacheMemoryBenchmarks","method":"ForcedGcRetention","parameters":{},"job":"storage-net10-windows-x64","runtime":".NET 10.0","tfm":"net10.0-windows","architecture":"X64","scenario":"forced_gc_retention/os_cache_uncontrolled","cache_topology":"production-node-shared-analyzers","dataset_id":"tiny-v1"},
+          "required":true,"contract_checks":["child_provenance","owned_fixture","invocation_correlation"],
+          "metrics":[
+            {"metric":"mean","unit":"ns/op","direction":"lower","statistic":"mean","required":true,"budget_status":"tbd","owner":"whole diagnostic time"},
+            {"metric":"allocated","unit":"B/op","direction":"lower","statistic":"bytes_per_operation","required":true,"budget_status":"tbd","owner":"whole diagnostic allocations"},
+            {"metric":"uncertainty","unit":"ci999_half_width_ns_per_op","direction":"lower","statistic":"ci999_half_width","required":false,"budget_status":"tbd","owner":"new production workload"},
+            {"metric":"stage_duration","unit":"ms","direction":"lower","statistic":"mean_elapsed_ms","required":true,"budget_status":"tbd","owner":"extra forced-GC diagnostic after product clear"},
+            {"metric":"managed_residual","unit":"B","direction":"lower","statistic":"max_signed_delta","required":true,"budget_status":"tbd","owner":"forced-GC heap minus populated baseline"}]
         }
       ]
     }

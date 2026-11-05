@@ -20,7 +20,9 @@ public static class ThresholdValidator
         {
             ["mean"] = ("ns/op", "lower", "mean"),
             ["allocated"] = ("B/op", "lower", "bytes_per_operation"),
-            ["uncertainty"] = ("ci999_half_width_ns_per_op", "lower", "ci999_half_width")
+            ["uncertainty"] = ("ci999_half_width_ns_per_op", "lower", "ci999_half_width"),
+            ["stage_duration"] = ("ms", "lower", "mean_elapsed_ms"),
+            ["managed_residual"] = ("B", "lower", "max_signed_delta")
         };
 
     public static T Read<T>(string path)
@@ -76,7 +78,7 @@ public static class ThresholdValidator
                         definition == (m.Unit, m.Direction, m.Statistic), "Unknown metric/unit/direction/statistic: " + m.Metric);
                     Require(m.BudgetStatus is "approved" or "historical" or "tbd", "Unknown budget status.");
                     Require(!string.IsNullOrWhiteSpace(m.Owner), "Budget owner/provenance absent.");
-                    Require(ValidBound(m.Lower) && ValidBound(m.Upper), "Nonfinite or negative bound.");
+                    Require(ValidBound(m.Metric, m.Lower) && ValidBound(m.Metric, m.Upper), "Nonfinite or out-of-domain bound.");
                     Require(m.Lower is null || m.Upper is null || m.Lower <= m.Upper, "Inverted bounds.");
                     Require(m.BudgetStatus != "approved" || m.Lower is not null || m.Upper is not null, "Approved budget has no bound.");
                     Require(m.BudgetStatus != "tbd" || m.Lower is null && m.Upper is null, "TBD budget cannot contain limits.");
@@ -157,7 +159,7 @@ public static class ThresholdValidator
                     metric.Scenario == result.Identity.Scenario && metric.CorrectnessStatus == result.CorrectnessStatus &&
                     metric.SampleCount >= 0 && metric.MeasurementStatus is "measured" or "not_measured" or "not_supported" or "failed";
                 if (metric.MeasurementStatus == "measured")
-                    valid &= metric.Value is double value && double.IsFinite(value) && value >= 0 &&
+                    valid &= metric.Value is double value && ValidValue(metric.Metric, value) &&
                         metric.SampleCount > 0 && RawExists(artifactRoot, metric.RawArtifact);
                 else
                     valid &= metric.Value == null && metric.SampleCount == 0 && !string.IsNullOrWhiteSpace(metric.Reason);
@@ -213,7 +215,7 @@ public static class ThresholdValidator
             run.Cases.Where(c => c.ExecutionStatus == "succeeded").Select(c => c.Identity.Id).ToArray(),
             evaluated.Where(c => c.ExecutionStatus == "succeeded" && profile.Cases.Single(p => p.Identity.Id == c.Identity.Id)
                 .Metrics.Where(m => m.Required).All(m => c.Metrics.Any(r => r.Metric == m.Metric && r.MeasurementStatus == "measured" &&
-                    r.Value is double v && double.IsFinite(v) && v >= 0 && r.SampleCount > 0 && RawExists(artifactRoot, r.RawArtifact))))
+                    r.Value is double v && ValidValue(r.Metric, v) && r.SampleCount > 0 && RawExists(artifactRoot, r.RawArtifact))))
                 .Select(c => c.Identity.Id).ToArray(),
             missing.Distinct().ToArray(), extra,
             profile.Cases.Where(c => !c.Required).ToDictionary(c => c.Identity.Id, c => c.OptionalReason!));
@@ -232,7 +234,10 @@ public static class ThresholdValidator
             File.Exists(path) && new FileInfo(path).Length > 0;
     }
 
-    private static bool ValidBound(double? v) => v == null || double.IsFinite(v.Value) && v >= 0;
+    public static bool ValidValue(string metric, double value) => Metrics.ContainsKey(metric) &&
+        double.IsFinite(value) && (metric == "managed_residual" || value >= 0);
+
+    private static bool ValidBound(string metric, double? value) => value == null || ValidValue(metric, value.Value);
     private static void ValidateIdentity(CaseIdentity c)
     {
         Require(new[] { c.Type, c.Method, c.Job, c.Runtime, c.Tfm, c.Architecture, c.Scenario, c.CacheTopology, c.DatasetId }
