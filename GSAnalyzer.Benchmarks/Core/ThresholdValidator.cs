@@ -32,7 +32,7 @@ public static class ThresholdValidator
         return doc.RootElement.Deserialize<T>(Json) ?? throw new InvalidDataException("Null document: " + path);
     }
 
-    private static void RejectDuplicates(JsonElement node)
+    internal static void RejectDuplicates(JsonElement node)
     {
         if (node.ValueKind == JsonValueKind.Object)
         {
@@ -58,6 +58,7 @@ public static class ThresholdValidator
         Unique(policy.Profiles.Select(p => p.Id), "profile");
         foreach (var p in policy.Profiles)
         {
+            Require(p.CollectionKind is "bdn" or "scenario", "Unknown collection kind: " + p.CollectionKind);
             Require(p.Purpose is "contract" or "performance" or "release", "Unknown profile purpose: " + p.Purpose);
             Require(p.Types.Length > 0 && p.Cases.Length > 0, "Empty profile: " + p.Id);
             Unique(p.Types, "type");
@@ -98,6 +99,7 @@ public static class ThresholdValidator
         Check(run.SchemaVersion == 1, "Unknown evidence schema.");
         Check(run.RunId == expectedRunId && Guid.TryParseExact(run.RunId, "N", out _), "Run identity mismatch.");
         Check(run.ProfileId == profile.Id, "Profile identity mismatch.");
+        Check(run.CollectionKind == profile.CollectionKind && run.CollectionKind is "bdn" or "scenario", "Collection kind mismatch.");
         Check(run.ConfigSha256 == configSha256 && configSha256.Length == 64, "Configuration hash mismatch.");
         failures.AddRange(run.CollectionErrors);
         string[] expected = profile.Cases.Select(c => c.Identity.Id).ToArray();

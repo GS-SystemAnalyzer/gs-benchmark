@@ -10,6 +10,7 @@ public sealed record BenchmarkPolicy
 
 public sealed record BenchmarkProfile
 {
+    public string CollectionKind { get; init; } = "bdn";
     public required string Id { get; init; }
     public required string Purpose { get; init; }
     public required string[] Types { get; init; }
@@ -90,6 +91,7 @@ public sealed record CaseResult
 
 public sealed record RunEvidence
 {
+    public string CollectionKind { get; init; } = "bdn";
     public required int SchemaVersion { get; init; }
     public required string RunId { get; init; }
     public required string ProfileId { get; init; }
@@ -113,4 +115,7 @@ public sealed record ArtifactEntry(string Path, long Bytes, string Sha256);
 public sealed record RunManifest(int SchemaVersion, string RunId, string ProfileId, string Purpose,
     string Mode, DateTimeOffset StartedUtc, DateTimeOffset EndedUtc, SourceIdentity Core,
     SourceIdentity Harness, string ConfigSha256, string DatasetSha256,
-    Dictionary<string, string> Environment, ArtifactEntry[] Artifacts);
+    Dictionary<string, string> Environment, ArtifactEntry[] Artifacts)
+{
+    public string CollectionKind { get; init; } = "bdn";
+}

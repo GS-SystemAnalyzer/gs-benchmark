@@ -144,6 +144,7 @@ public static class BenchmarkResults
 
     public static BenchmarkRunInfo[] Discover(BenchmarkProfile profile, string rawRoot)
     {
+        if (profile.CollectionKind != "bdn") throw new InvalidDataException("BDN discovery requires collection_kind=bdn.");
         var runs = new List<BenchmarkRunInfo>();
         foreach (string typeName in profile.Types)
         {
@@ -153,7 +154,10 @@ public static class BenchmarkResults
             bool synthetic = type.Namespace == "GSAnalyzer.Benchmarks.Suites.Diagnostics";
             bool windows = !synthetic || type == typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks);
             string tfm = windows ? "net10.0-windows" : "net10.0";
-            string jobName = synthetic ? (windows ? "contract-net10-windows-x64" : "contract-net10-x64") :
+            bool engine = EngineObservation.IsEngine(type);
+            bool live = type == typeof(Suites.Memory.NativeRamBenchmarks) || type == typeof(Suites.Processing.NativeCpuBenchmarks);
+            string jobName = engine ? (live ? "engine-live-net10-windows-x64" : "engine-net10-windows-x64") :
+                synthetic ? (windows ? "contract-net10-windows-x64" : "contract-net10-x64") :
                 type == typeof(Suites.Storage.CacheFootprintBenchmark) ? "legacy-net10-windows-x64" : "storage-net10-windows-x64";
             var config = ManualConfig.Create(DefaultConfig.Instance)
                 .WithArtifactsPath(rawRoot)
@@ -179,8 +183,9 @@ public static class BenchmarkResults
     public static CaseIdentity Identity(BenchmarkCase c)
     {
         bool synthetic = c.Descriptor.Type.Namespace == "GSAnalyzer.Benchmarks.Suites.Diagnostics";
+        bool engine = EngineObservation.IsEngine(c.Descriptor.Type);
         string method = c.Descriptor.WorkloadMethod.Name;
-        string scenario = synthetic ? (method == "Throw" ? "synthetic-throw" : "synthetic-allocation") : method switch
+        string scenario = engine ? "engine/" + method : synthetic ? (method == "Throw" ? "synthetic-throw" : "synthetic-allocation") : method switch
         {
             "Footprint_FullStoragePipeline" => "legacy-pipeline",
             "ReturnToIdle_AfterClearCache" => "legacy-clear",
@@ -201,8 +206,8 @@ public static class BenchmarkResults
             Runtime = c.Job.Environment.Runtime!.Name,
             Tfm = synthetic && c.Descriptor.Type != typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks) ? "net10.0" : "net10.0-windows",
             Architecture = c.Job.Environment.Platform.ToString(), Scenario = scenario,
-            CacheTopology = synthetic ? "none" : scenario.StartsWith("legacy-") ? "legacy-shared" : "production-node-shared-analyzers",
-            DatasetId = synthetic ? "synthetic-v1" : scenario.StartsWith("legacy-") ? "legacy-storage-v1" :
+            CacheTopology = engine ? "engine-local" : synthetic ? "none" : scenario.StartsWith("legacy-") ? "legacy-shared" : "production-node-shared-analyzers",
+            DatasetId = engine ? "engine-reference-v1" : synthetic ? "synthetic-v1" : scenario.StartsWith("legacy-") ? "legacy-storage-v1" :
                 c.Parameters.Items.SingleOrDefault(p => p.Name == "Dataset")?.Value as string ?? "tiny-v1"
         };
     }
@@ -210,7 +215,7 @@ public static class BenchmarkResults
     public static bool CanExecute(Type type) => type == typeof(Suites.Diagnostics.HarnessSmokeBenchmarks) ||
         type == typeof(Suites.Diagnostics.HarnessThrowBenchmarks) || type == typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks) ||
         type == typeof(Suites.Storage.ScannerBenchmarks) || type == typeof(Suites.Storage.CacheFootprintBenchmark) ||
-        type == typeof(Suites.Memory.CacheMemoryBenchmarks);
+        type == typeof(Suites.Memory.CacheMemoryBenchmarks) || EngineObservation.IsEngine(type);
 
     private static bool IsStorage(Type type) => type == typeof(Suites.Storage.ScannerBenchmarks) ||
         type == typeof(Suites.Storage.CacheFootprintBenchmark) || type == typeof(Suites.Memory.CacheMemoryBenchmarks);
@@ -278,6 +283,8 @@ public static class BenchmarkResults
         }
         else errors.Add("Generated project evidence missing.");
         bool storage = IsStorage(report.BenchmarkCase.Descriptor.Type);
+        bool engine = EngineObservation.IsEngine(report.BenchmarkCase.Descriptor.Type);
+        EngineInvocation[]? engineRecords = null;
         StorageInvocation[]? storageRecords = null;
         var job = report.BenchmarkCase.Job;
         var storageJob = !storage ? null : new { strategy = job.Run.RunStrategy.ToString(), job.Run.LaunchCount, job.Run.WarmupCount,
@@ -297,6 +304,23 @@ public static class BenchmarkResults
             }
             catch (Exception error) { errors.Add("Storage correlation failed: " + error.Message); }
         }
+        var engineJob = !engine ? null : new { strategy = job.Run.RunStrategy.ToString(), job.Run.LaunchCount, job.Run.WarmupCount,
+            job.Run.IterationCount, job.Run.InvocationCount, job.Run.UnrollFactor,
+            report.BenchmarkCase.Descriptor.OperationsPerInvoke, gc_operations = report.GcStats.TotalOperations };
+        if (engine)
+        {
+            try
+            {
+                if (engineJob!.strategy != "Monitoring" || engineJob.LaunchCount != 1 || engineJob.WarmupCount != 1 ||
+                    engineJob.IterationCount != 3 || engineJob.InvocationCount != 1 || engineJob.UnrollFactor != 1 ||
+                    engineJob.OperationsPerInvoke != 1 || report.ExecuteResults.Count != 1)
+                    throw new InvalidDataException("Unsupported engine job shape.");
+                var execution = report.ExecuteResults.Single();
+                engineRecords = EngineObservation.Correlate(identity, runId, execution.ProcessId ?? 0, execution.StandardOutput.ToArray(),
+                    execution.Measurements.ToArray(), report.GcStats.TotalOperations);
+            }
+            catch (Exception error) { errors.Add("Engine correlation failed: " + error.Message); }
+        }
         Write(Path.Combine(root, raw), new
         {
             run_id = runId, case_id = identity.Id, report.Success,
@@ -305,6 +329,7 @@ public static class BenchmarkResults
             launches = report.ExecuteResults.Select(e => new { e.FoundExecutable, e.ExitCode, e.ProcessId, e.Errors, e.StandardOutput, e.Results, e.PrefixedLines }),
             measurements = report.AllMeasurements.Select(m => new { m.LaunchIndex, m.IterationIndex, m.IterationMode, m.IterationStage, m.Operations, m.Nanoseconds }),
             storage_job = storageJob,
+            engine_job = engineJob,
             storage_mapping = storageRecords?.Select(r => new { r.Invocation, stage = r.Invocation == 1 ? "warmup" :
                 r.Invocation == storageRecords.Length ? "diagnostic" : "actual" })
         });
@@ -334,7 +359,7 @@ public static class BenchmarkResults
             Metrics = [Metric("mean", statistics?.Mean, statistics?.N ?? 0), Metric("allocated", allocation, allocation == null ? 0 : 1),
                 Metric("uncertainty", uncertainty, statistics?.N ?? 0)]
         };
-        return storage ? ApplyStorage(normalized, storageRecords) : normalized;
+        return storage ? ApplyStorage(normalized, storageRecords) : engine ? EngineObservation.Apply(normalized, engineRecords) : normalized;
     }
 
     public static StorageInvocation[] CorrelateStorage(CaseIdentity identity, string runId, int processId,
@@ -431,14 +456,14 @@ public static class BenchmarkResults
         var artifacts = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Where(p => p != Path.Combine(root, "manifest.json"))
             .Order(StringComparer.Ordinal).Select(p => new ArtifactEntry(Path.GetRelativePath(root, p).Replace('\\', '/'), new FileInfo(p).Length, Hash(p))).ToArray();
-        manifest = manifest with { EndedUtc = DateTimeOffset.UtcNow, Artifacts = artifacts };
+        manifest = manifest with { EndedUtc = manifest.CollectionKind == "scenario" ? manifest.EndedUtc : DateTimeOffset.UtcNow, Artifacts = artifacts };
         Write(Path.Combine(root, "manifest.json"), manifest);
         return manifest;
     }
 
     public static void VerifyInventory(string root, RunManifest manifest)
     {
-        if (manifest.SchemaVersion != 1 || manifest.Mode is not ("discover" or "report" or "gate") ||
+        if (manifest.SchemaVersion != 1 || manifest.CollectionKind is not ("bdn" or "scenario") || manifest.Mode is not ("discover" or "report" or "gate") ||
             manifest.StartedUtc > manifest.EndedUtc || !Guid.TryParseExact(manifest.RunId, "N", out _))
             throw new InvalidDataException("Invalid manifest metadata.");
         var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -461,6 +486,7 @@ public static class BenchmarkResults
 
     public static void VerifyExecution(string root, RunManifest manifest, RunEvidence evidence)
     {
+        if (manifest.CollectionKind != "bdn" || evidence.CollectionKind != "bdn") throw new InvalidDataException("BDN replay requires collection_kind=bdn.");
         var successful = evidence.Cases.Where(c => c.ExecutionStatus == "succeeded").ToArray();
         if (successful.Length == 0) return;
         void Require(bool valid, string reason)
@@ -542,6 +568,23 @@ public static class BenchmarkResults
                     Require(recorded != null && recorded.Value == metric.Value && recorded.SampleCount == metric.SampleCount &&
                         recorded.MeasurementStatus == metric.MeasurementStatus, "storage metric: " + metric.Metric);
                 }
+            }
+            if (EngineObservation.TypeFor(result.Identity.Method) == result.Identity.Type)
+            {
+                var job = raw.GetProperty("engine_job");
+                Require(result.LaunchCount == 1 && job.GetProperty("strategy").GetString() == "Monitoring" &&
+                    job.GetProperty("launch_count").GetInt32() == 1 && job.GetProperty("warmup_count").GetInt32() == 1 &&
+                    job.GetProperty("iteration_count").GetInt32() == 3 && job.GetProperty("invocation_count").GetInt64() == 1 &&
+                    job.GetProperty("unroll_factor").GetInt32() == 1 && job.GetProperty("operations_per_invoke").GetInt64() == 1, "engine job shape");
+                var launch = launches[0];
+                var records = EngineObservation.Correlate(result.Identity, manifest.RunId, launch.GetProperty("process_id").GetInt32(),
+                    launch.GetProperty("standard_output").EnumerateArray().Select(s => s.GetString()!).ToArray(),
+                    launch.GetProperty("results").EnumerateArray().Select(s => Measurement.Parse(s.GetString()!, 1))
+                        .Where(m => m.IterationMode != IterationMode.Unknown).ToArray(), job.GetProperty("gc_operations").GetInt64());
+                var derived = EngineObservation.Apply(result, records);
+                Require(derived.CorrectnessStatus == result.CorrectnessStatus && result.Metrics.All(m => m.CorrectnessStatus == derived.CorrectnessStatus) &&
+                    result.ContractChecks.Count == derived.ContractChecks.Count && derived.ContractChecks.All(p => result.ContractChecks.GetValueOrDefault(p.Key) == p.Value),
+                    "engine correctness/contract");
             }
             var build = ThresholdValidator.Read<JsonElement>(Path.Combine(root, prefix + "-build.json"));
             var project = System.Xml.Linq.XDocument.Load(Path.Combine(root, prefix + ".csproj"));
