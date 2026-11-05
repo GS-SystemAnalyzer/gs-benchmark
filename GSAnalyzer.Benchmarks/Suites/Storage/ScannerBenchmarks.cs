@@ -1,102 +1,33 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using BenchmarkDotNet.Attributes;
-using GSSystemAnalyzer.Engine;
-using GSSystemAnalyzer.Hubs;
-using GSSystemAnalyzer.Interfaces;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
+﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Engines;
+using GSAnalyzer.Benchmarks.Core;
 
-namespace GSAnalyzer.Benchmarks.Suites.Storage
+namespace GSAnalyzer.Benchmarks.Suites.Storage;
+
+[MemoryDiagnoser]
+[SimpleJob(RunStrategy.Monitoring, launchCount: 1, warmupCount: 1, iterationCount: 3, invocationCount: 1)]
+public class ScannerBenchmarks
 {
-    [MemoryDiagnoser]
-    public class ScannerBenchmarks
-    {
-        private DiskScannerEngine _scanner = null!;
-        private string _testDirectory = null!;
-        private List<FileSystemInfo> _testItems = null!;
-        private Guid _scanId;
+    private StorageFixture _fixture = null!;
+    private readonly StorageWorkload workload = new();
 
-        [GlobalSetup]
-        public void Setup()
-        {
-            using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-            var setupLogger = loggerFactory.CreateLogger<ScannerBenchmarks>();
+    [Params("tiny-v1", "tiny-unicode-v1")]
+    public string Dataset { get; set; } = "tiny-v1";
 
-            _testDirectory = Path.Combine(Path.GetTempPath(), "GSAnalyzer_Benchmark_CI");
+    [GlobalSetup] public void Setup() => BenchmarkResults.WriteChildProvenance();
+    [IterationSetup(Target = nameof(AppEmpty))]
+    public void EmptySetup() => _fixture = workload.Begin(nameof(AppEmpty), "app_empty", Dataset);
+    [IterationSetup(Target = nameof(AppHit))]
+    public void HitSetup() => _fixture = workload.Begin(nameof(AppHit), "app_hit", Dataset);
+    [IterationSetup(Target = nameof(ChangedRescan))]
+    public void ChangedSetup() => _fixture = workload.Begin(nameof(ChangedRescan), "changed_rescan", Dataset);
+    [IterationSetup(Target = nameof(PersistedRestore))]
+    public void RestoreSetup() => _fixture = workload.Begin(nameof(PersistedRestore), "persisted_restore", Dataset);
 
-            if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, true);
-            Directory.CreateDirectory(_testDirectory);
-
-            setupLogger.LogInformation("Generating 50,000 physical files for CI runner sandbox...");
-
-            int totalFolders = 500;
-            int rootFolders = 5;
-            int filesPerFolder = 100; // 500 folders * 100 files = 50,000 files
-            int subFoldersPerRoot = totalFolders / rootFolders; // 100 subfolders per root
-
-            // Parallel file creation for maximum CI runner speed
-            Parallel.For(0, rootFolders, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, r =>
-            {
-                string rootPath = Path.Combine(_testDirectory, $"Root_{r}");
-                Directory.CreateDirectory(rootPath);
-
-                for (int s = 0; s < subFoldersPerRoot; s++)
-                {
-                    string subPath = Path.Combine(rootPath, $"Sub_{s}");
-                    Directory.CreateDirectory(subPath);
-
-                    for (int f = 0; f < filesPerFolder; f++)
-                    {
-                        // 0-byte file creation to conserve the runner's disk space
-                        File.Create(Path.Combine(subPath, $"file_{f}.txt")).Dispose();
-                    }
-                }
-            });
-
-            var dirInfo = new DirectoryInfo(_testDirectory);
-            _testItems = dirInfo.GetFileSystemInfos().ToList();
-            _scanId = Guid.NewGuid();
-
-            var mockClientProxy = new Mock<IClientProxy>();
-            var mockClients = new Mock<IHubClients>();
-            mockClients.Setup(c => c.All).Returns(mockClientProxy.Object);
-
-            var mockHub = new Mock<IHubContext<SystemHub>>();
-            mockHub.Setup(h => h.Clients).Returns(mockClients.Object);
-
-            var mockSettings = new Mock<ISettingService>();
-            mockSettings.Setup(s => s.Current).Returns(new GSSystemAnalyzer.Models.SettingDtos.AppSettingDto
-            {
-                Scan = new GSSystemAnalyzer.Models.SettingDtos.ScanSettingDto
-                {
-                    Depth = 10,
-                    ExcludedPaths = new List<string>()
-                }
-            });
-
-            var engineLogger = NullLogger<DiskScannerEngine>.Instance;
-            _scanner = new DiskScannerEngine(mockHub.Object, mockSettings.Object, engineLogger);
-        }
-
-        [Benchmark]
-        public async Task MeasureDiskScanner_CI()
-        {
-            await _scanner.CalculateMissingSizesAsync(_testItems, _scanId);
-        }
-
-        [GlobalCleanup]
-        public void Cleanup()
-        {
-            if (Directory.Exists(_testDirectory))
-            {
-                Directory.Delete(_testDirectory, true);
-            }
-        }
-    }
+    [Benchmark] public Task AppEmpty() => workload.Run();
+    [Benchmark] public Task AppHit() => workload.Run();
+    [Benchmark] public Task ChangedRescan() => workload.Run();
+    [Benchmark] public Task PersistedRestore() => workload.Run();
+    [IterationCleanup] public void Record() => workload.Finish();
+    [GlobalCleanup] public void Cleanup() => workload.Cleanup();
 }

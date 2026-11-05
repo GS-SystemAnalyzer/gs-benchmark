@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
+using GSAnalyzer.Benchmarks.Core;
 using GSSystemAnalyzer.Engine;
 using GSSystemAnalyzer.Hubs;
 using GSSystemAnalyzer.Interfaces;
@@ -23,13 +25,6 @@ namespace GSAnalyzer.Benchmarks.Suites.Storage
         // its ~600 KB noise exceeded the effect, so it failed on correct code. Smoke test only.
         private const long MaxResidualBytes = 12_000_000;
 
-        private static readonly string[] Extensions =
-        {
-            ".txt", ".log", ".mp4", ".mov", ".jpg", ".png", ".pdf", ".docx",
-            ".xlsx", ".zip", ".rar", ".cs", ".js", ".ts", ".json", ".xml",
-            ".dll", ".exe", ".iso", ".bin"
-        };
-
         private DiskScannerEngine _engine = null!;
         private FileTypeScanner _fileTypeScanner = null!;
         private AgeHeatmapEngine _ageHeatmap = null!;
@@ -38,43 +33,31 @@ namespace GSAnalyzer.Benchmarks.Suites.Storage
         private List<string> _leafFolders = null!;
         private Guid _scanId;
         private long _idleManagedBytes;
+        private StorageFixture _fixture = null!;
+        private readonly string _launch = Guid.NewGuid().ToString("N");
+        private string _method = "";
+        private int _invocation;
+        private long _afterManagedBytes;
+        private double _elapsedMs;
+        private int _populatedDirectories, _populatedFiles;
 
         [GlobalSetup]
         public void Setup()
         {
-            _testDirectory = Path.Combine(Path.GetTempPath(), "GSAnalyzer_Issue141_CI");
-
-            if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, true);
-            Directory.CreateDirectory(_testDirectory);
-
-            const int rootFolders = 5;
-            const int subFoldersPerRoot = 200;   // 1,000 leaf folders
-            const int filesPerExtension = 2;     // 20 exts * 2 = 40 files/folder => 40,000 files
-
-            // 0-byte files keep runner disk low; the footprint we measure is the
-            // retained extension map + path strings, not the file bytes.
-            Parallel.For(0, rootFolders, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, r =>
+            BenchmarkResults.WriteChildProvenance();
+            _fixture = new StorageFixture(StorageManifest.Legacy(footprint: true));
+            try { SetupOwned(); }
+            catch (Exception error)
             {
-                string rootPath = Path.Combine(_testDirectory, $"Root_{r}");
-                Directory.CreateDirectory(rootPath);
+                try { Cleanup(); }
+                catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+                throw;
+            }
+        }
 
-                for (int s = 0; s < subFoldersPerRoot; s++)
-                {
-                    string subPath = Path.Combine(rootPath, $"Sub_{s}");
-                    Directory.CreateDirectory(subPath);
-
-                    foreach (string ext in Extensions)
-                    {
-                        for (int f = 0; f < filesPerExtension; f++)
-                        {
-                            // Long, unique names so each retained LargestFilePath
-                            // string carries real weight.
-                            string fileName = $"verbose_report_document_{r}_{s}_{f}{ext}";
-                            File.Create(Path.Combine(subPath, fileName)).Dispose();
-                        }
-                    }
-                }
-            });
+        private void SetupOwned()
+        {
+            _testDirectory = _fixture.Workload;
 
             var dirInfo = new DirectoryInfo(_testDirectory);
             _testItems = dirInfo.GetFileSystemInfos().ToList();
@@ -98,39 +81,50 @@ namespace GSAnalyzer.Benchmarks.Suites.Storage
                 }
             });
 
-            _engine = new DiskScannerEngine(mockHub.Object, mockSettings.Object, NullLogger<DiskScannerEngine>.Instance);
-            _fileTypeScanner = new FileTypeScanner(_engine, new MemoryCache(new MemoryCacheOptions()));
-            _ageHeatmap = new AgeHeatmapEngine(_engine, new MemoryCache(new MemoryCacheOptions()));
+            _engine = _fixture.Own(new DiskScannerEngine(mockHub.Object, mockSettings.Object, NullLogger<DiskScannerEngine>.Instance,
+                cacheFilePath: _fixture.CachePath));
+            _fileTypeScanner = new FileTypeScanner(_engine, _fixture.Own(new MemoryCache(new MemoryCacheOptions())));
+            _ageHeatmap = new AgeHeatmapEngine(_engine, _fixture.Own(new MemoryCache(new MemoryCacheOptions())));
 
             // Idle baseline: tree exists, engine constructed, NO scan yet.
             _idleManagedBytes = GC.GetTotalMemory(forceFullCollection: true);
         }
 
         // Fresh scan cache before every measured operation.
-        [IterationSetup]
-        public void ResetScanCache()
+        [IterationSetup(Target = nameof(Footprint_FullStoragePipeline))]
+        public void PipelineSetup() => ResetScanCache(nameof(Footprint_FullStoragePipeline));
+        [IterationSetup(Target = nameof(ReturnToIdle_AfterClearCache))]
+        public void ResidualSetup() => ResetScanCache(nameof(ReturnToIdle_AfterClearCache));
+
+        private void ResetScanCache(string method)
         {
+            _method = method;
+            _invocation++;
+            _populatedDirectories = _populatedFiles = 0;
             _engine.DirectorySizeCache.Clear();
         }
 
         [Benchmark]
         public async Task Footprint_FullStoragePipeline()
         {
-            await _engine.CalculateMissingSizesAsync(_testItems, _scanId);
+            long start = Stopwatch.GetTimestamp();
+            await Populate();
 
             // The three analyzers a Storage view triggers; each retains a snapshot
             // derived from the per-folder extension maps.
             _fileTypeScanner.Analyze(_testDirectory);
             _fileTypeScanner.GetExtensionBreakdown(_testDirectory);
             _ageHeatmap.Analyze(_testDirectory);
+            _elapsedMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         }
 
         [Benchmark]
         public async Task ReturnToIdle_AfterClearCache()
         {
+            long start = Stopwatch.GetTimestamp();
             // Populate everything the way a real session does: full scan plus a
             // per-folder snapshot in each analyzer cache.
-            await _engine.CalculateMissingSizesAsync(_testItems, _scanId);
+            await Populate();
             foreach (string folder in _leafFolders)
             {
                 _fileTypeScanner.Analyze(folder);
@@ -141,7 +135,9 @@ namespace GSAnalyzer.Benchmarks.Suites.Storage
             // The operation under test.
             _engine.ClearCache();
 
-            long residual = GC.GetTotalMemory(forceFullCollection: true) - _idleManagedBytes;
+            _afterManagedBytes = GC.GetTotalMemory(forceFullCollection: true);
+            long residual = _afterManagedBytes - _idleManagedBytes;
+            _elapsedMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             if (residual > MaxResidualBytes)
             {
                 throw new InvalidOperationException(
@@ -155,13 +151,37 @@ namespace GSAnalyzer.Benchmarks.Suites.Storage
             }
         }
 
+        private async Task Populate()
+        {
+            _scanId = _engine.BeginScanSession();
+            try { await _fixture.Run(async () => { await _engine.CalculateMissingSizesAsync(_testItems, _scanId); return true; }); }
+            finally { _engine.EndScanSession(_scanId); }
+            _populatedDirectories = _engine.DirectorySizeCache.Count;
+            _populatedFiles = _engine.DirectorySizeCache.Values.Sum(e => e.Extensions?.Values.Sum(x => x.Count) ?? 0);
+        }
+
+        [IterationCleanup]
+        public void Record()
+        {
+            var expected = StorageWorkload.LegacyExpected();
+            var actual = new Dictionary<string, string> { ["populated_directories"] = _populatedDirectories.ToString(),
+                ["populated_files"] = _populatedFiles.ToString() };
+            bool residual = _method == nameof(ReturnToIdle_AfterClearCache);
+            StorageWorkload.Emit(new StorageInvocation { RunId = Environment.GetEnvironmentVariable("GS_BENCH_RUN_ID") ?? "standalone",
+                LaunchId = _launch, ProcessId = Environment.ProcessId, Method = _method, Invocation = _invocation,
+                Root = _fixture.Root, CachePath = _fixture.CachePath, Manifest = _fixture.Manifest,
+                Scenario = residual ? "legacy-clear" : "legacy-pipeline", Expected = expected, Actual = actual,
+                Differences = StorageOracle.Compare(expected, actual), Before = new() { ["os_cache"] = StorageWorkload.OsCache },
+                After = new() { ["directory_entries"] = _engine.DirectorySizeCache.Count.ToString() },
+                StagesMs = new() { [residual ? "legacy-clear" : "legacy-pipeline"] = _elapsedMs },
+                BaselineBytes = residual ? _idleManagedBytes : null, AfterBytes = residual ? _afterManagedBytes : null, Cleaned = false });
+        }
+
         [GlobalCleanup]
         public void Cleanup()
         {
-            if (Directory.Exists(_testDirectory))
-            {
-                Directory.Delete(_testDirectory, true);
-            }
+            _fixture?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (_fixture != null) Console.WriteLine(StorageWorkload.CleanupPrefix + System.Text.Json.JsonSerializer.Serialize(_fixture.Root));
         }
     }
 }

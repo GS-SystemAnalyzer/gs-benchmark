@@ -10,6 +10,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Exporters.Csv;
 using BenchmarkDotNet.Jobs;
@@ -152,7 +153,8 @@ public static class BenchmarkResults
             bool synthetic = type.Namespace == "GSAnalyzer.Benchmarks.Suites.Diagnostics";
             bool windows = !synthetic || type == typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks);
             string tfm = windows ? "net10.0-windows" : "net10.0";
-            string jobName = synthetic ? (windows ? "contract-net10-windows-x64" : "contract-net10-x64") : "legacy-net10-windows-x64";
+            string jobName = synthetic ? (windows ? "contract-net10-windows-x64" : "contract-net10-x64") :
+                type == typeof(Suites.Storage.CacheFootprintBenchmark) ? "legacy-net10-windows-x64" : "storage-net10-windows-x64";
             var config = ManualConfig.Create(DefaultConfig.Instance)
                 .WithArtifactsPath(rawRoot)
                 .WithOptions(ConfigOptions.KeepBenchmarkFiles | ConfigOptions.LogBuildOutput | ConfigOptions.GenerateMSBuildBinLog)
@@ -160,12 +162,12 @@ public static class BenchmarkResults
                 .AddExporter(JsonExporter.Full, CsvMeasurementsExporter.Default);
             // Mutators preserve the legacy attribute's iteration strategy without adding a second job.
             var mutator = Job.Default.WithRuntime(CoreRuntime.Core10_0).WithPlatform(Platform.X64)
-                .WithToolchain(CsProjCoreToolchain.From(new NetCoreAppSettings(tfm, null, jobName)))
-                .AsMutator();
+                .WithToolchain(CsProjCoreToolchain.From(new NetCoreAppSettings(tfm, null, jobName)));
             if (synthetic)
                 mutator = mutator.WithLaunchCount(1).WithWarmupCount(1).WithIterationCount(3)
-                    .WithInvocationCount(1024).WithUnrollFactor(1);
-            config.AddJob(mutator);
+                     .WithInvocationCount(1024).WithUnrollFactor(1);
+            else mutator = mutator.WithUnrollFactor(1);
+            config.AddJob(mutator.AsMutator());
             var converted = BenchmarkConverter.TypeToBenchmarks(type, config);
             var cases = converted.BenchmarksCases.Select(c => BenchmarkCase.Create(c.Descriptor,
                 c.Job.WithId(jobName), c.Parameters, c.Config)).ToArray();
@@ -180,10 +182,9 @@ public static class BenchmarkResults
         string method = c.Descriptor.WorkloadMethod.Name;
         string scenario = synthetic ? (method == "Throw" ? "synthetic-throw" : "synthetic-allocation") : method switch
         {
-            "MeasureDiskScanner_CI" => "legacy-scanner",
             "Footprint_FullStoragePipeline" => "legacy-pipeline",
             "ReturnToIdle_AfterClearCache" => "legacy-clear",
-            _ => "unregistered"
+            _ => IsStorage(c.Descriptor.Type) ? StorageScenario(method) + "/" + StorageWorkload.OsCache : "unregistered"
         };
         var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (var p in c.Parameters.Items)
@@ -200,12 +201,28 @@ public static class BenchmarkResults
             Runtime = c.Job.Environment.Runtime!.Name,
             Tfm = synthetic && c.Descriptor.Type != typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks) ? "net10.0" : "net10.0-windows",
             Architecture = c.Job.Environment.Platform.ToString(), Scenario = scenario,
-            CacheTopology = synthetic ? "none" : "legacy-shared", DatasetId = synthetic ? "synthetic-v1" : "legacy-storage-v1"
+            CacheTopology = synthetic ? "none" : scenario.StartsWith("legacy-") ? "legacy-shared" : "production-node-shared-analyzers",
+            DatasetId = synthetic ? "synthetic-v1" : scenario.StartsWith("legacy-") ? "legacy-storage-v1" :
+                c.Parameters.Items.SingleOrDefault(p => p.Name == "Dataset")?.Value as string ?? "tiny-v1"
         };
     }
 
     public static bool CanExecute(Type type) => type == typeof(Suites.Diagnostics.HarnessSmokeBenchmarks) ||
-        type == typeof(Suites.Diagnostics.HarnessThrowBenchmarks) || type == typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks);
+        type == typeof(Suites.Diagnostics.HarnessThrowBenchmarks) || type == typeof(Suites.Diagnostics.HarnessWindowsSmokeBenchmarks) ||
+        type == typeof(Suites.Storage.ScannerBenchmarks) || type == typeof(Suites.Storage.CacheFootprintBenchmark) ||
+        type == typeof(Suites.Memory.CacheMemoryBenchmarks);
+
+    private static bool IsStorage(Type type) => type == typeof(Suites.Storage.ScannerBenchmarks) ||
+        type == typeof(Suites.Storage.CacheFootprintBenchmark) || type == typeof(Suites.Memory.CacheMemoryBenchmarks);
+
+    public static string StorageScenario(string method) => method switch
+    {
+        "AppEmpty" or "PopulationRebuild" => "app_empty", "AppHit" => "app_hit", "ChangedRescan" => "changed_rescan",
+        "PersistedRestore" => "persisted_restore", "WarmedAnalyzerHit" => "analyzer_hit", "ClearAction" => "clear_action",
+        "PassiveAfterProductGc" => "passive_after_product_gc", "ForcedGcRetention" => "forced_gc_retention",
+        "Footprint_FullStoragePipeline" => "legacy-pipeline", "ReturnToIdle_AfterClearCache" => "legacy-clear",
+        _ => throw new InvalidDataException("Unregistered storage method: " + method)
+    };
 
     public static CaseResult Normalize(BenchmarkReport report, string runId, string root,
         Dictionary<string, string> parent, string sourceProject)
@@ -260,13 +277,36 @@ public static class BenchmarkResults
                 File.Copy(binlog, Path.Combine(root, "component-results", key + "-" + Path.GetFileName(binlog)), overwrite: true);
         }
         else errors.Add("Generated project evidence missing.");
+        bool storage = IsStorage(report.BenchmarkCase.Descriptor.Type);
+        StorageInvocation[]? storageRecords = null;
+        var job = report.BenchmarkCase.Job;
+        var storageJob = !storage ? null : new { strategy = job.Run.RunStrategy.ToString(), job.Run.LaunchCount, job.Run.WarmupCount,
+            job.Run.IterationCount, job.Run.InvocationCount, job.Run.UnrollFactor,
+            report.BenchmarkCase.Descriptor.OperationsPerInvoke, gc_operations = report.GcStats.TotalOperations };
+        if (storage)
+        {
+            try
+            {
+                if (storageJob!.strategy != "Monitoring" || storageJob.LaunchCount != 1 || storageJob.WarmupCount != 1 ||
+                    storageJob.IterationCount != (identity.Scenario.StartsWith("legacy-") ? 8 : 3) || storageJob.InvocationCount != 1 ||
+                    storageJob.UnrollFactor != 1 || storageJob.OperationsPerInvoke != 1 || report.ExecuteResults.Count != 1)
+                    throw new InvalidDataException("Unsupported storage job shape.");
+                var execution = report.ExecuteResults.Single();
+                storageRecords = CorrelateStorage(identity, runId, execution.ProcessId ?? 0, execution.StandardOutput.ToArray(),
+                    execution.Measurements.ToArray(), report.GcStats.TotalOperations);
+            }
+            catch (Exception error) { errors.Add("Storage correlation failed: " + error.Message); }
+        }
         Write(Path.Combine(root, raw), new
         {
             run_id = runId, case_id = identity.Id, report.Success,
             generated = report.GenerateResult?.IsGenerateSuccess, built = report.BuildResult?.IsBuildSuccess,
             build_error = report.BuildResult?.ErrorMessage, errors, children = childProofs,
-            launches = report.ExecuteResults.Select(e => new { e.FoundExecutable, e.ExitCode, e.ProcessId, e.Errors, e.StandardOutput, e.Results }),
-            measurements = report.AllMeasurements.Select(m => new { m.LaunchIndex, m.IterationMode, m.IterationStage, m.Operations, m.Nanoseconds })
+            launches = report.ExecuteResults.Select(e => new { e.FoundExecutable, e.ExitCode, e.ProcessId, e.Errors, e.StandardOutput, e.Results, e.PrefixedLines }),
+            measurements = report.AllMeasurements.Select(m => new { m.LaunchIndex, m.IterationIndex, m.IterationMode, m.IterationStage, m.Operations, m.Nanoseconds }),
+            storage_job = storageJob,
+            storage_mapping = storageRecords?.Select(r => new { r.Invocation, stage = r.Invocation == 1 ? "warmup" :
+                r.Invocation == storageRecords.Length ? "diagnostic" : "actual" })
         });
         var statistics = report.ResultStatistics;
         long? allocation = report.BenchmarkCase.Config.GetDiagnosers().Any(d => d is MemoryDiagnoser) && report.GcStats.TotalOperations > 0 &&
@@ -282,7 +322,7 @@ public static class BenchmarkResults
             SampleCount = value is double x && double.IsFinite(x) && x >= 0 && count > 0 ? count : 0,
             CorrectnessStatus = "not_checked", Reason = "BDN result; missing/nonfinite diagnostics remain unmeasured.", RawArtifact = raw
         };
-        return new()
+        var normalized = new CaseResult
         {
             Identity = identity, ExecutionStatus = errors.Count == 0 ? "succeeded" : "failed", ExecutionErrors = errors.ToArray(),
             LaunchCount = report.ExecuteResults.Count, ContractChecks = new()
@@ -294,6 +334,84 @@ public static class BenchmarkResults
             Metrics = [Metric("mean", statistics?.Mean, statistics?.N ?? 0), Metric("allocated", allocation, allocation == null ? 0 : 1),
                 Metric("uncertainty", uncertainty, statistics?.N ?? 0)]
         };
+        return storage ? ApplyStorage(normalized, storageRecords) : normalized;
+    }
+
+    public static StorageInvocation[] CorrelateStorage(CaseIdentity identity, string runId, int processId,
+        string[] stdout, Measurement[] measurements, long gcOperations)
+    {
+        void Require(bool valid, string reason) { if (!valid) throw new InvalidDataException(reason); }
+        bool legacy = identity.Scenario.StartsWith("legacy-");
+        int actualCount = legacy ? 8 : 3;
+        Require(processId > 0 && gcOperations == 1, "Diagnostic invocation shape.");
+        var ordinary = measurements.Where(m => m.IterationStage != IterationStage.Result).ToArray();
+        Require(ordinary.Length == actualCount + 1, "Measurement count.");
+        for (int i = 0; i < ordinary.Length; i++)
+        {
+            var m = ordinary[i];
+            Require(m.IterationMode == IterationMode.Workload && m.IterationStage == (i == 0 ? IterationStage.Warmup : IterationStage.Actual) &&
+                m.IterationIndex == (i == 0 ? 1 : i) && m.LaunchIndex == 1 && m.Operations == 1 &&
+                double.IsFinite(m.Nanoseconds) && m.Nanoseconds >= 0, "Measurement sequence/operations.");
+        }
+        var results = measurements.Where(m => m.IterationStage == IterationStage.Result).ToArray();
+        Require(results.Length == actualCount && results.Select((m, i) => m.IterationMode == IterationMode.Workload &&
+            m.IterationIndex == i + 1 && m.LaunchIndex == 1 && m.Operations == 1 && double.IsFinite(m.Nanoseconds) &&
+            m.Nanoseconds >= 0).All(x => x), "Result measurement sequence/operations.");
+        var records = stdout.Where(s => s.StartsWith(StorageWorkload.Prefix, StringComparison.Ordinal))
+            .Select(s => JsonSerializer.Deserialize<StorageInvocation>(s[StorageWorkload.Prefix.Length..], ThresholdValidator.Json)!).ToArray();
+        Require(records.Length == actualCount + 2, "Missing/duplicate storage invocations.");
+        var manifest = legacy ? StorageManifest.Legacy(true) : StorageManifest.Tiny(identity.DatasetId == "tiny-unicode-v1");
+        if (!legacy && StorageScenario(identity.Method) == "changed_rescan")
+            manifest = manifest with { Files = manifest.Files.Select(f => f.Path == "A/a.txt" ? f with { Bytes = 13 } : f).ToArray() };
+        var expected = legacy ? StorageWorkload.LegacyExpected() : StorageWorkload.Expected(manifest, StorageScenario(identity.Method));
+        for (int i = 0; i < records.Length; i++)
+        {
+            var r = records[i];
+            Require(r.RunId == runId && r.ProcessId == processId && r.Method == identity.Method && r.Invocation == i + 1 &&
+                r.Scenario == StorageScenario(identity.Method) && Guid.TryParseExact(r.LaunchId, "N", out _) &&
+                r.LaunchId == records[0].LaunchId, "Storage invocation identity.");
+            Require(JsonSerializer.Serialize(r.Manifest, ThresholdValidator.Json) == JsonSerializer.Serialize(manifest, ThresholdValidator.Json), "Storage manifest identity.");
+            Require(r.Expected.Count == expected.Count && expected.All(p => r.Expected.TryGetValue(p.Key, out var values) && p.Value.SequenceEqual(values)), "Independent expected output.");
+            Require(r.Differences.SequenceEqual(StorageOracle.Compare(expected, r.Actual)), "Storage discrepancies.");
+            Require(Path.IsPathFullyQualified(r.Root) && Path.GetFullPath(r.Root) == r.Root &&
+                Path.GetFileName(r.Root).StartsWith("gs-storage-", StringComparison.Ordinal) &&
+                Guid.TryParseExact(Path.GetFileName(r.Root)["gs-storage-".Length..], "N", out _) &&
+                r.CachePath == Path.Combine(r.Root, "state", "scanner_memory.json") &&
+                r.Before.GetValueOrDefault("os_cache") == StorageWorkload.OsCache, "Storage ownership/state identity.");
+            Require(legacy ? !r.Cleaned && stdout.Count(s => s == StorageWorkload.CleanupPrefix + JsonSerializer.Serialize(r.Root)) == 1 :
+                r.Cleaned, "Storage cleanup evidence.");
+            Require(r.StagesMs.ContainsKey(r.Scenario) && r.StagesMs.All(p => double.IsFinite(p.Value) && p.Value >= 0) &&
+                r.StagesMs.Count == (r.Scenario is "passive_after_product_gc" or "forced_gc_retention" ? 2 : 1) &&
+                (r.StagesMs.Count == 1 || r.StagesMs.ContainsKey("product_clear")), "Stage records.");
+            bool residual = r.Scenario is "legacy-clear" or "forced_gc_retention" or "passive_after_product_gc";
+            Require(residual ? r.BaselineBytes >= 0 && r.AfterBytes >= 0 : r.BaselineBytes == null && r.AfterBytes == null, "Managed snapshots.");
+        }
+        Require(legacy ? records.All(r => r.Root == records[0].Root) : records.Select(r => r.Root).Distinct().Count() == records.Length,
+            "Invocation fixture ownership.");
+        return records;
+    }
+
+    private static CaseResult ApplyStorage(CaseResult result, StorageInvocation[]? records)
+    {
+        bool legacy = result.Identity.Scenario.StartsWith("legacy-");
+        string correctness = records == null || records.Any(r => r.Differences.Length > 0) ? "failed" : legacy ? "not_checked" : "passed";
+        var metrics = result.Metrics.Select(m => m with { CorrectnessStatus = correctness }).ToList();
+        void Add(string name, double? value, int count)
+        {
+            var d = ThresholdValidator.Metrics[name];
+            metrics.Add(new() { CaseId = result.Identity.Id, DatasetId = result.Identity.DatasetId, Scenario = result.Identity.Scenario,
+                Metric = name, Unit = d.Unit, Direction = d.Direction, Statistic = d.Statistic, Value = value,
+                SampleCount = count, MeasurementStatus = value == null ? "not_measured" : "measured", CorrectnessStatus = correctness,
+                Reason = "Validated child invocation evidence; residual maximum includes warmup and extra-stats diagnostic.",
+                RawArtifact = result.Metrics[0].RawArtifact });
+        }
+        if (!legacy) Add("stage_duration", records?.Where(r => r.Invocation > 1 && r.Invocation < records.Length).Average(r => r.StagesMs[r.Scenario]), records == null ? 0 : records.Length - 2);
+        if (StorageScenario(result.Identity.Method) is "legacy-clear" or "forced_gc_retention" or "passive_after_product_gc")
+            Add("managed_residual", records?.Max(r => (double)(r.AfterBytes!.Value - r.BaselineBytes!.Value)), records?.Length ?? 0);
+        return result with { Metrics = metrics.ToArray(), CorrectnessStatus = correctness,
+            CorrectnessBasis = legacy ? "Legacy population contract only; no production-performance acceptance." : "Independent manifest output, persistence and actual traversal observations.",
+            ContractChecks = new() { ["child_provenance"] = result.ExecutionStatus == "succeeded" ? "passed" : "failed",
+                ["owned_fixture"] = records == null ? "failed" : "passed", ["invocation_correlation"] = records == null ? "failed" : "passed" } };
     }
 
     public static RunManifest FinalizeRun(string root, RunManifest manifest, string configPath,
@@ -395,6 +513,35 @@ public static class BenchmarkResults
                     .All(k => child[k] == parent[k]) && launch.GetProperty("process_id").GetInt32() > 0 &&
                     child["process_id"] == launch.GetProperty("process_id").GetInt32().ToString(CultureInfo.InvariantCulture) &&
                     !string.IsNullOrWhiteSpace(child["core_path"]) && Hex(child["core_sha256"], 64) && Hex(child["harness_sha256"], 64), "child identity: " + id);
+            }
+            if (result.Identity.CacheTopology is "production-node-shared-analyzers" or "legacy-shared")
+            {
+                var job = raw.GetProperty("storage_job");
+                int actualCount = result.Identity.Scenario.StartsWith("legacy-") ? 8 : 3;
+                Require(result.LaunchCount == 1 && job.GetProperty("strategy").GetString() == "Monitoring" &&
+                    job.GetProperty("launch_count").GetInt32() == 1 && job.GetProperty("warmup_count").GetInt32() == 1 &&
+                    job.GetProperty("iteration_count").GetInt32() == actualCount && job.GetProperty("invocation_count").GetInt64() == 1 &&
+                    job.GetProperty("unroll_factor").GetInt32() == 1 && job.GetProperty("operations_per_invoke").GetInt64() == 1,
+                    "storage job shape");
+                var launch = launches[0];
+                var measurements = launch.GetProperty("results").EnumerateArray().Select(s => Measurement.Parse(s.GetString()!, 1))
+                    .Where(m => m.IterationMode != IterationMode.Unknown).ToArray();
+                var records = CorrelateStorage(result.Identity, manifest.RunId, launch.GetProperty("process_id").GetInt32(),
+                    launch.GetProperty("standard_output").EnumerateArray().Select(s => s.GetString()!).ToArray(), measurements,
+                    job.GetProperty("gc_operations").GetInt64());
+                var mapping = raw.GetProperty("storage_mapping");
+                Require(mapping.GetArrayLength() == records.Length && mapping.EnumerateArray().Select((m, i) =>
+                    m.GetProperty("invocation").GetInt32() == i + 1 && m.GetProperty("stage").GetString() ==
+                    (i == 0 ? "warmup" : i == records.Length - 1 ? "diagnostic" : "actual")).All(x => x), "storage stage mapping");
+                var derived = ApplyStorage(result with { Metrics = result.Metrics.Where(m => m.Metric is not ("stage_duration" or "managed_residual")).ToArray() }, records);
+                Require(derived.CorrectnessStatus == result.CorrectnessStatus && result.Metrics.All(m => m.CorrectnessStatus == derived.CorrectnessStatus) &&
+                    result.ContractChecks.Count == derived.ContractChecks.Count && derived.ContractChecks.All(p => result.ContractChecks.GetValueOrDefault(p.Key) == p.Value), "storage correctness/contract");
+                foreach (var metric in derived.Metrics.Where(m => m.Metric is "stage_duration" or "managed_residual"))
+                {
+                    var recorded = result.Metrics.SingleOrDefault(m => m.Metric == metric.Metric);
+                    Require(recorded != null && recorded.Value == metric.Value && recorded.SampleCount == metric.SampleCount &&
+                        recorded.MeasurementStatus == metric.MeasurementStatus, "storage metric: " + metric.Metric);
+                }
             }
             var build = ThresholdValidator.Read<JsonElement>(Path.Combine(root, prefix + "-build.json"));
             var project = System.Xml.Linq.XDocument.Load(Path.Combine(root, prefix + ".csproj"));
