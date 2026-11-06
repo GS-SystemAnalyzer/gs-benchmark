@@ -25,12 +25,14 @@ public class Program
             string runId = Guid.NewGuid().ToString("N");
             string output = Path.GetFullPath(options.GetValueOrDefault("output") ?? Path.Combine(AppContext.BaseDirectory, "runs"));
             string? input = options.TryGetValue("evidence", out string? suppliedEvidence) ? Path.GetFullPath(suppliedEvidence) : null;
-            if (input != null)
+            string? rawInput = options.TryGetValue("import", out string? suppliedRaw) ? Path.GetFullPath(suppliedRaw) : null;
+            if (input != null && rawInput != null) throw new InvalidDataException("--evidence and --import are mutually exclusive.");
+            if (options.ContainsKey("manifest-sha") && input == null) throw new InvalidDataException("--manifest-sha requires --evidence.");
+            if (input != null || rawInput != null)
             {
-                string relative = Path.GetRelativePath(input, output);
-                if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                if (!ScenarioResults.Outside(input ?? rawInput!, output))
                 {
-                    Console.Error.WriteLine("--output must be outside --evidence; no output was created.");
+                    Console.Error.WriteLine($"--output must be outside --{(input != null ? "evidence" : "import")}; no output was created.");
                     return 1;
                 }
             }
@@ -42,6 +44,10 @@ public class Program
             var policy = ThresholdValidator.Read<BenchmarkPolicy>(configPath);
             var profile = ThresholdValidator.Profile(policy, profileId);
             string configHash = BenchmarkResults.Hash(configPath);
+            if (rawInput != null && (profile.CollectionKind != "scenario" || mode == "discover"))
+                throw new InvalidDataException("--import requires a scenario profile in report or gate mode.");
+            if (profile.CollectionKind == "scenario" && options.Keys.Any(k => k is "filter" or "source-project" or "core-repo" or "selftest-build-failure"))
+                throw new InvalidDataException("Scenario collection does not accept BDN execution options.");
 
             if (input != null)
             {
@@ -51,11 +57,12 @@ public class Program
                 BenchmarkResults.VerifyInventory(input, manifest);
                 var evidence = ThresholdValidator.Read<RunEvidence>(Path.Combine(input, "case-results.json"));
                 if (BenchmarkResults.Hash(Path.Combine(input, "policy.json")) != configHash || manifest.ConfigSha256 != configHash ||
-                    manifest.ProfileId != profileId || manifest.Purpose != profile.Purpose ||
+                    manifest.ProfileId != profileId || manifest.Purpose != profile.Purpose || manifest.CollectionKind != profile.CollectionKind ||
                     manifest.DatasetSha256 != BenchmarkResults.DatasetHash(profile.Cases.Select(c => c.Identity)))
                     throw new InvalidDataException("Evidence manifest does not match the selected policy/profile/dataset.");
                 if (manifest.Mode == "discover" && mode != "discover") throw new InvalidDataException("Discovery cannot satisfy execution evidence.");
-                BenchmarkResults.VerifyExecution(input, manifest, evidence);
+                if (profile.CollectionKind == "scenario") ScenarioResults.VerifyExecution(input, manifest, evidence, profile);
+                else BenchmarkResults.VerifyExecution(input, manifest, evidence);
                 var result = ThresholdValidator.Evaluate(profile, evidence, mode, manifest.RunId, configHash, input);
                 BenchmarkResults.Write(Path.Combine(root, "validation.json"), result);
                 Console.WriteLine($"Read-only evidence validation: {result.Decision}; checksum consistency does not establish trusted provenance.");
@@ -63,6 +70,32 @@ public class Program
             }
 
             DateTimeOffset start = DateTimeOffset.UtcNow;
+            if (profile.CollectionKind == "scenario")
+            {
+                RunEvidence evidence;
+                RunManifest manifest;
+                if (mode == "discover")
+                {
+                    evidence = new() { CollectionKind = "scenario", SchemaVersion = 1, RunId = runId,
+                        ProfileId = profileId, ConfigSha256 = configHash, Discovered = ScenarioResults.Discover(profile),
+                        Cases = [], CollectionErrors = [] };
+                    manifest = new(1, runId, profileId, profile.Purpose, mode, start, start,
+                        new("not_collected", false), new("not_collected", false), configHash,
+                        BenchmarkResults.DatasetHash(profile.Cases.Select(c => c.Identity)), new(), []) { CollectionKind = "scenario" };
+                }
+                else
+                {
+                    if (rawInput == null) throw new InvalidDataException("Scenario execution requires --import or --evidence.");
+                    (manifest, evidence) = ScenarioResults.Import(profile, rawInput, root, configHash, mode);
+                }
+                var result = ThresholdValidator.Evaluate(profile, evidence, mode, manifest.RunId, configHash, root);
+                var completedScenario = BenchmarkResults.FinalizeRun(root, manifest, configPath, evidence, result);
+                BenchmarkResults.VerifyInventory(root, completedScenario);
+                ScenarioResults.VerifyExecution(root, completedScenario, evidence with { Cases = result.Cases }, profile);
+                foreach (string failure in result.Failures) Console.Error.WriteLine(failure);
+                Console.WriteLine($"{mode}/{profile.Purpose}: {result.Decision}. Manifest SHA256: {BenchmarkResults.Hash(Path.Combine(root, "manifest.json"))}");
+                return result.Success ? 0 : 1;
+            }
             var runs = BenchmarkResults.Discover(profile, Path.Combine(root, "raw"));
             var discovered = runs.SelectMany(r => r.BenchmarksCases).Select(BenchmarkResults.Identity).ToArray();
             var collectionErrors = new List<string>();
@@ -130,13 +163,11 @@ public class Program
             Console.Error.WriteLine("Benchmark invocation failed: " + error.Message);
             try
             {
-                if (root == null)
+                if (root != null)
                 {
-                    root = Path.Combine(AppContext.BaseDirectory, "runs", "run-" + Guid.NewGuid().ToString("N"));
-                    Directory.CreateDirectory(root);
+                    BenchmarkResults.Write(Path.Combine(root, "failure.json"), new { decision = "fail", error = error.ToString() });
+                    Console.Error.WriteLine("Failure artifact: " + Path.Combine(root, "failure.json"));
                 }
-                BenchmarkResults.Write(Path.Combine(root, "failure.json"), new { decision = "fail", error = error.ToString() });
-                Console.Error.WriteLine("Failure artifact: " + Path.Combine(root, "failure.json"));
             }
             catch (Exception writeError) { Console.Error.WriteLine("Failure artifact could not be written: " + writeError.Message); }
             return 1;
@@ -154,7 +185,7 @@ public class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] names = ["mode", "profile", "config", "output", "source-project", "core-repo", "filter", "evidence", "manifest-sha", "aggregate"];
+        string[] names = ["mode", "profile", "config", "output", "source-project", "core-repo", "filter", "evidence", "import", "manifest-sha", "aggregate"];
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < args.Length; i++)
         {

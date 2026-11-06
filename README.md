@@ -60,6 +60,13 @@ before converter invocation. Only the memory diagnoser is supported here.
 | `storage-tiny` | performance | 8 owned cases: four application-cache states × ASCII/non-BMP datasets; numeric budgets TBD |
 | `storage-stages` | performance | 5 owned production-topology cases: population, analyzer hit, clear, passive observation, forced-GC retention; numeric budgets TBD |
 | `legacy-footprint` | contract | Preserved full pipeline and return-to-idle diagnostic; isolated 40,000-file fixture |
+| `engine-ram` | performance | 6 parser/projection cases at 10/100/1000 controlled processes |
+| `engine-cpu` | performance | 3 controlled projection cases at 1/8/64 cores |
+| `engine-network`, `engine-disk` | performance | 3 cases each at 1/8/32 adapters and 1/4/16 disks |
+| `engine-history` | performance | 32 query/UTF-8 serialization cases: 0/60/1800/10000 points × 5/15/30/60 minutes |
+| `engine-native-live` | performance | Explicit Windows-only native CPU/process acquisition; separate from deterministic cases |
+| `transport-mock` | contract | 10 source-registered scenario identities; imported mock evidence cannot establish product acceptance |
+| `transport-real` | performance | Same 10 identities for actual client/backend collection; disposable Windows environment required |
 
 `legacy-scanner` and the `legacy-storage` union are retired. Their mixed-state
 scanner measurement is replaced by the eight explicit `storage-tiny` identities.
@@ -151,6 +158,173 @@ its population/ownership contract only, not independent product correctness.
 Earlier interrupted runs and their exact owned roots remain preserved. Local
 BDN environment dumps/build binlogs can contain inherited credentials; use a
 restricted child environment and review bundles before sharing them.
+
+## Engine and scenario measurements
+
+Engine profiles require the matching PR2 core source with companion friend access,
+controlled CPU projection and monotonic-clock seams. Run deterministic profiles
+separately from `engine-native-live`; native output is not a fixed-population or
+hardware-accuracy oracle. All new performance budgets remain TBD.
+
+```powershell
+dotnet run --project GSAnalyzer.Benchmarks -c Release -f net10.0-windows --no-build -- --mode report --profile engine-ram --output <evidence-parent>
+dotnet run --project GSAnalyzer.Benchmarks -c Release -f net10.0 --no-build -- --mode discover --profile transport-real --output <evidence-parent>
+dotnet run --project GSAnalyzer.Benchmarks -c Release -f net10.0 --no-build -- --mode report --profile transport-real --import <capture-directory> --output <separate-evidence-parent>
+```
+
+`collection_kind` is `bdn` (the compatibility default) or `scenario`. Scenario
+discovery executes no process or fixture. `--import` accepts the declared
+`collection.json` and artifact inventory; `--evidence` replays a finalized bundle.
+They are mutually exclusive. Both require output outside the input tree; scenario
+operations reject BDN filters/source/build options. Import/replay needs no source
+checkout. Source hashes and checksums supply consistency, not externally trusted
+provenance.
+
+Scenario JSONL retains producer camelCase, decimal-string clocks/sequences, process
+epochs, attempt outcomes and local stages. The normalized `stage_duration` is the
+mean of complete client-local attempt intervals, including failed/timed-out ones.
+Missing intervals remain unmeasured and failed. Raw stage pairs, entity-body bytes,
+hub-protocol UTF-8 bytes, counts and sequence jumps remain distinct observations;
+they do not establish packet loss, cross-clock one-way latency or rendered frames.
+
+The controlled network32 case retains exact-decimal oracle discrepancies:
+adapter13 **0.19/0.20**,19 **0.29/0.28**,29 **0.43/0.44** actual/expected.
+These are failed product correctness, including in report/replay; passing detector
+tests do not change that status. PR1B's storage and legacy failures above remain.
+
+### Owned Windows scenario capture
+
+**Actual-client capture exercised; product acceptance remains blocked below.**
+The launcher and production-provider driver were exercised together in Windows
+Sandbox on 2026-11-05. The ten-case capture retains eight driver successes and
+PersistedRestore/Reconnect timeouts. A focused follow-up with corrected restore
+readiness completed AppHit, ChangedRescan and PersistedRestore with valid correlation;
+ChangedRescan still returned stale output. Driver completion is not product acceptance.
+
+`scripts/run-scenarios.ps1` captures Idle, AppEmpty, AppHit, ChangedRescan,
+PersistedRestore, ConcurrentRoots, ActiveCancelRestart, QueuedCancelRestart,
+HistoryRanges and Reconnect once each. Both scenario profiles identify the dataset
+as `tiny-v1+scanner-50k-v1`: 7-file/90-B tiny trees and a cancellation fixture with
+506 directories/50,000 zero-byte files. ChangedRescan changes `A/a.txt` from5 to13 B
+and waits for the production watcher. Missing a cancellation window stays failed.
+
+Prepare the complete matching backend publish directory and Flutter Windows
+Release directory, including dependencies. Build the client with
+`integration_test/benchmark_transport_test.dart` as its target. This is a
+production-provider integration driver, distinct from the distributed UI bundle.
+Use matching source/artifact sets and a disposable Windows profile:
+
+```powershell
+# Matching core/backend checkout:
+dotnet publish GSSystemAnalyzer.csproj -c Release -f net10.0-windows -r win-x64 --self-contained true -o <backend-artifact-directory>
+# Matching core/frontend/gs_analyzer_ui checkout:
+flutter build windows --release --target integration_test/benchmark_transport_test.dart
+# This repository, in a Windows console under the disposable profile:
+powershell.exe -NoProfile -File scripts/run-scenarios.ps1 -Config <absolute-config.json> -Output <new-capture-directory> -ValidateOnly
+powershell.exe -NoProfile -File scripts/run-scenarios.ps1 -Config <absolute-config.json> -Output <new-capture-directory>
+```
+
+For a bounded follow-up, invoke the script from PowerShell with
+`-ScenarioMethods @('AppHit','ChangedRescan','PersistedRestore')`. Unknown/duplicate
+names are rejected. Omit it for all ten methods; partial captures still fail the
+full profile's missing-case checks.
+
+The config is camelCase JSON:
+
+| Required field | Value |
+| --- | --- |
+| `schemaVersion`, `detail` | `1`; `minimal` or `rich` |
+| `environment` | `{id, disposable: true, sid, profile, roaming, local, temp}` matching the executing token and resolved known folders |
+| `backend`, `client` | `{root, executable, sha256}`: absolute artifact directory, relative `.exe`, full artifact-set hash |
+| `core`, `harness` | `{root, sha, dirty, sourceSha256}`: absolute checkout, 40-character HEAD SHA, Boolean dirty state, source inventory hash |
+| `versions` | `{sdk, flutter, dart}` with actual build-tool versions |
+| `sentinels` | 1–16 absolute external paths compared before/after collection |
+
+Inventories hash UTF-8 `path<TAB>bytes<TAB>sha256<LF>` records, including the final
+newline, with case-sorted relative slash paths and lowercase SHA-256. Artifact
+hashes can be computed without launching the app:
+
+```powershell
+. ./scripts/run-scenarios.ps1 -LibraryOnly
+Get-InventoryHash @(Get-Inventory <absolute-artifact-directory>)
+```
+
+Source membership comes from `git ls-files -z --cached --others --exclude-standard`,
+uniquely case-sorted, with `-1`/`missing` for deleted tracked files. `Assert-Source`
+rechecks HEAD, dirty state and the inventory. Build-to-source linkage remains
+supplied; hashes establish consistency (`scripts/run-scenarios.ps1:121-178,609-640`).
+
+The actual `%APPDATA%/GSAnalyzer` directory must initially be absent. Output must
+be new, absolute, disjoint from inputs/state/sentinels, and on the state volume.
+Preflight checks known folders/SID, artifact/source identity, console and port5200.
+`-ValidateOnly` inspects Git and compiles launcher declarations without creating
+backend/client processes (`scripts/run-scenarios.ps1:650-676`).
+
+Capture retains traces, fixture inventories, control records and archived state.
+Failures retain `collection-incomplete.json` and `failure.json`; these are not
+valid import substitutes. A successful launcher exit only permits subsequent
+evaluation (`scripts/run-scenarios.ps1:609-640,767-807`).
+
+Import independently checks request/scan/root/launch bindings, roles, setup,
+mutation evidence and observed work. `stage-summaries.json` is rederived on replay
+and groups same-clock means by stage and outcome. Timeout durations describe
+deadlines. Aggregate traversal counts do not prove unique per-file coverage
+(`GSAnalyzer.Benchmarks/Core/ScenarioResults.cs:301-391,594-701`).
+
+Allocation sequence is not guaranteed wire order. Import verifies unique typed
+send/receipt identity and truthful ordering labels independently, retaining actual
+duplicates and missing messages. Nonzero process exits fail execution without
+automatically corrupting a complete trace. Correlation failure alone leaves product
+correctness unproven (`GSAnalyzer.Benchmarks/Core/ScenarioResults.cs:331-391,403-474`).
+
+**Remaining acceptance limits:** the driver reports package-internal transport
+settlement as unknown; backend eviction-queue settlement may also be unknown.
+Recorder drain/process exit cannot establish global quiescence. Persisted-restore
+consumption and history response-content correctness remain `not_checked`.
+Isolated in-memory off/minimal/rich timings do not qualify live overhead.
+Together with the retained product failures, these prevent a qualified
+real-transport performance baseline.
+
+### Separate live observer-overhead comparison
+
+The integration driver also accepts `measurement: "overhead"`, `method: "AppHit"`,
+`detail: "off" | "minimal" | "rich"`, and the owned launch `outputDirectory`.
+Other ownership, fixture, settings and deadline fields remain required. This path
+runs one untimed tiny-fixture seed followed by16 sequential warm streaming scans,
+validating the four final nodes after each new scan's loading-to-terminal transition.
+It writes `overhead-result.json` under the control directory, retaining partial
+completed work on failure. These results are separate from scenario import/replay.
+
+For an owned `-LibraryOnly` orchestration, `New-Launch` takes a final
+`TraceEnabled` boolean (default `$true`). Pass `$false` to both backend and client
+for off, and set the launch owner detail to off. Both trace activation variables
+are then absent; the client verifies that no recorder was constructed. Minimal
+and rich use the same executable and ordinary provider completion logic.
+
+Compare three counterbalanced orders (off/minimal/rich, minimal/rich/off,
+rich/off/minimal), with fresh backend/client processes and owned product state
+per trial. Retain exact scan outputs/counts, elapsed microseconds, incidental RAM
+publication/group counts, trace bytes and loss/drain evidence, and job settlement.
+Off must produce no trace files. Backend rich adds cache observations; client rich
+currently changes only its start-record label. Unequal incidental telemetry and
+unjoined package internals limit attribution; new performance budgets remain TBD.
+
+Windows Sandbox measurement, 2026-11-05: three trials per mode, 16 timed scans per
+trial, plus one untimed seed. All 153 outputs matched four final nodes totaling90 B;
+all18 app processes exited normally. Off created no recorder/trace; all12 enabled
+traces drained with zero drops/outstanding work.
+
+| Mode | Mean workload (ms) | Trial range (ms) | Mean scan (ms) |
+| --- | ---: | ---: | ---: |
+| Off | 189.241 | 107.301–289.889 | 11.826 |
+| Minimal | 219.645 | 156.786–259.475 | 13.726 |
+| Rich | 198.228 | 142.530–260.252 | 12.388 |
+
+These are descriptive tiny warm-stream observations, not an approved baseline.
+All modes had zero RAM publications during seed/work; enabled clients received
+initial telemetry before that interval. Backend eviction queues and client transport
+internals remain unjoined. Substantial trial variation prevents attributing the
+mean differences solely to instrumentation.
 
 ## Evidence schema v1
 

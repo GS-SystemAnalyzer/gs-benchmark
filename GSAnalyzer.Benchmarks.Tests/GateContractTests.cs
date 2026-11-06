@@ -279,6 +279,11 @@ public sealed class GateContractTests : IDisposable
         foreach (var profile in policy.Profiles)
         {
             ThresholdValidator.Profile(policy, profile.Id);
+            if (profile.CollectionKind == "scenario")
+            {
+                Assert.Equal(profile.Cases.Select(c => c.Identity.Id).Order(), ScenarioResults.Discover(profile).Select(c => c.Id).Order());
+                continue;
+            }
             var runs = BenchmarkResults.Discover(profile, Path.Combine(root, "discovery"));
             Assert.All(runs.SelectMany(r => r.BenchmarksCases), c => Assert.True(c.Job.Environment.Runtime != null,
                 profile.Id + ": " + c.DisplayInfo));
@@ -300,6 +305,116 @@ public sealed class GateContractTests : IDisposable
             policy.Profiles.Single(p => p.Id == "legacy-footprint").Cases.Select(c => c.Identity.Method).Order());
         Assert.False(BenchmarkResults.CanExecute(typeof(ConstructorTrap)));
         Assert.False(BenchmarkResults.CanExecute(typeof(GateFixture)));
+    }
+
+    [Fact]
+    public void AllFortyNineEngineIdentitiesMatchIndependentExpectations()
+    {
+        var policy = ThresholdValidator.Read<BenchmarkPolicy>(Path.Combine(AppContext.BaseDirectory, "thresholds.json"));
+        var expected = new Dictionary<string, List<CaseIdentity>>();
+        void Add(string profile, string type, string method, int[] counts, int[]? ranges = null, bool live = false)
+        {
+            if (!expected.ContainsKey(profile)) expected.Add(profile, []);
+            foreach (int count in counts)
+            foreach (int range in ranges ?? [0])
+            {
+                var parameters = new SortedDictionary<string, string>();
+                if (!live) parameters.Add("parameter:Count", "System.Int32:" + count);
+                if (ranges != null) parameters.Add("parameter:Minutes", "System.Int32:" + range);
+                expected[profile].Add(new() { Type = "GSAnalyzer.Benchmarks.Suites." + type, Method = method,
+                    Parameters = parameters, Job = live ? "engine-live-net10-windows-x64" : "engine-net10-windows-x64",
+                    Runtime = ".NET 10.0", Tfm = "net10.0-windows", Architecture = "X64", Scenario = "engine/" + method,
+                    CacheTopology = "engine-local", DatasetId = "engine-reference-v1" });
+            }
+        }
+        foreach (string method in new[] { "ParseSnapshot", "ProjectSnapshot" })
+            Add("engine-ram", "Memory.RamMonitoringBenchmarks", method, [10, 100, 1000]);
+        Add("engine-cpu", "Processing.CpuLoadBenchmarks", "ProjectCpu", [1, 8, 64]);
+        Add("engine-network", "Processing.NetworkContractBenchmarks", "SampleNetwork", [1, 8, 32]);
+        Add("engine-disk", "Processing.DiskContractBenchmarks", "SampleDisk", [1, 4, 16]);
+        foreach (string method in new[] { "QueryHistory", "SerializeHistory" })
+            Add("engine-history", "Processing.HistoryContractBenchmarks", method, [0, 60, 1800, 10000], [5, 15, 30, 60]);
+        Add("engine-native-live", "Memory.NativeRamBenchmarks", "ReadNativeProcesses", [0], live: true);
+        Add("engine-native-live", "Processing.NativeCpuBenchmarks", "ReadNativeCpu", [0], live: true);
+        Assert.Equal(49, expected.Values.Sum(c => c.Count));
+        Assert.Equal(expected.Keys.Order(), policy.Profiles.Where(p => p.Id.StartsWith("engine-")).Select(p => p.Id).Order());
+        foreach (var (name, identities) in expected)
+        {
+            var profile = ThresholdValidator.Profile(policy, name);
+            Assert.Equal("bdn", profile.CollectionKind);
+            Assert.Equal("performance", profile.Purpose);
+            Assert.Equal(identities.Select(c => c.Id).Order(), profile.Cases.Select(c => c.Identity.Id).Order());
+            var discovered = BenchmarkResults.Discover(profile, Path.Combine(root, name)).SelectMany(r => r.BenchmarksCases).ToArray();
+            Assert.Equal(identities.Select(c => c.Id).Order(), discovered.Select(BenchmarkResults.Identity).Select(c => c.Id).Order());
+            Assert.All(discovered, c =>
+            {
+                Assert.Equal(BenchmarkDotNet.Engines.RunStrategy.Monitoring, c.Job.Run.RunStrategy);
+                Assert.Equal((1, 1, 3, 1L, 1), (c.Job.Run.LaunchCount, c.Job.Run.WarmupCount,
+                    c.Job.Run.IterationCount, c.Job.Run.InvocationCount, c.Job.Run.UnrollFactor));
+            });
+            Assert.All(profile.Cases, c =>
+            {
+                Assert.True(c.Required);
+                Assert.Equal(new[] { "child_provenance", "invocation_correlation" }, c.ContractChecks);
+                Assert.Equal(new[] { "allocated", "mean", "uncertainty" }, c.Metrics.Select(m => m.Metric).Order());
+                Assert.All(c.Metrics, m => { Assert.Equal("tbd", m.BudgetStatus); Assert.Null(m.Lower); Assert.Null(m.Upper); });
+            });
+        }
+    }
+
+    [Theory]
+    [InlineData("scenario")]
+    [InlineData("unknown")]
+    public void BdnEvidenceAndDiscoveryCannotAcceptAnotherCollectionKind(string kind)
+    {
+        Assert.Contains("Collection kind mismatch.", Evaluate(Evidence() with { CollectionKind = kind }).Failures);
+        Assert.Contains("Collection kind mismatch.", Evaluate(policy: Policy() with { CollectionKind = kind }).Failures);
+        Assert.Throws<InvalidDataException>(() => BenchmarkResults.Discover(Policy() with { CollectionKind = kind }, root));
+        Assert.Throws<InvalidDataException>(() => BenchmarkResults.VerifyExecution(root,
+            new(1, runId, "control", "contract", "report", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                new("test", false), new("test", false), configHash, "test", new(), []), Evidence() with { CollectionKind = kind }));
+    }
+
+    [Fact]
+    public void LegacyJsonDefaultsToBdnAndUnknownPolicyKindIsRejected()
+    {
+        Assert.Equal("bdn", ThresholdValidator.Read<BenchmarkProfile>(WriteConfig(
+            JsonSerializer.Serialize(Policy(), ThresholdValidator.Json).Replace("\"collection_kind\": \"bdn\",", ""))).CollectionKind);
+        Assert.Throws<InvalidDataException>(() => ThresholdValidator.Profile(new() { SchemaVersion = 1,
+            Profiles = [Policy() with { CollectionKind = "unknown" }] }, "control"));
+    }
+
+    [Fact]
+    public void ScenarioProfilesHaveIndependentCoverageAndNoBdnSubstitution()
+    {
+        var policy = ThresholdValidator.Read<BenchmarkPolicy>(Path.Combine(AppContext.BaseDirectory, "thresholds.json"));
+        string[] methods = ["Idle", "AppEmpty", "AppHit", "ChangedRescan", "PersistedRestore", "ConcurrentRoots",
+            "ActiveCancelRestart", "QueuedCancelRestart", "HistoryRanges", "Reconnect"];
+        Assert.Equal(new[] { "transport-mock", "transport-real" }, policy.Profiles.Where(p => p.CollectionKind == "scenario").Select(p => p.Id).Order());
+        foreach (bool real in new[] { false, true })
+        {
+            var profile = ThresholdValidator.Profile(policy, real ? "transport-real" : "transport-mock");
+            Assert.Equal(real ? "performance" : "contract", profile.Purpose);
+            var expected = methods.Select(method => new CaseIdentity { Type = "GSAnalyzer.Benchmarks.Scenarios." + (real ? "RealTransport" : "MockTransport"),
+                Method = method, Parameters = new(), Job = "scenario-windows-x64", Runtime = "dotnet-flutter",
+                Tfm = "net10.0-windows+flutter", Architecture = "X64", Scenario = "transport/" + method,
+                CacheTopology = real ? "loopback-kestrel" : "mock", DatasetId = "tiny-v1+scanner-50k-v1" }).ToArray();
+            Assert.Equal(expected.Select(c => c.Id).Order(), profile.Cases.Select(c => c.Identity.Id).Order());
+            Assert.Equal(expected.Select(c => c.Id), ScenarioResults.Discover(profile).Select(c => c.Id));
+            Assert.All(profile.Cases, c =>
+            {
+                Assert.True(c.Required);
+                string[] checks = c.Identity.Method.Contains("Cancel") ? ["observer_integrity", "correlation", "scenario_outcome", "lifetime"] :
+                    ["observer_integrity", "correlation", "scenario_outcome"];
+                Assert.Equal(checks, c.ContractChecks);
+                var metric = Assert.Single(c.Metrics);
+                Assert.Equal(("stage_duration", "ms", "mean_elapsed_ms", "tbd"), (metric.Metric, metric.Unit, metric.Statistic, metric.BudgetStatus));
+                Assert.Null(metric.Lower); Assert.Null(metric.Upper);
+            });
+            Assert.Throws<InvalidDataException>(() => BenchmarkResults.Discover(profile, root));
+            Assert.Throws<InvalidDataException>(() => ScenarioResults.Discover(profile with { Id = "unregistered" }));
+            Assert.Throws<InvalidDataException>(() => ScenarioResults.Discover(profile with { Types = ["unregistered"] }));
+        }
     }
 
     [Theory]
@@ -363,6 +478,62 @@ public class SourceTrap
 
 public sealed class CliContractTests(Xunit.Abstractions.ITestOutputHelper output)
 {
+    [Fact, Trait("Category", "Cli")]
+    public async Task ScenarioDiscoveryReplayAndRawInputContainmentAreSourceFree()
+    {
+        string owned = Path.Combine(Path.GetTempPath(), "gs-scenario-cli-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(owned);
+        output.WriteLine("Retained scenario CLI controls: " + owned);
+        async Task<string> Invoke(int expected, params string[] arguments)
+        {
+            var start = new ProcessStartInfo("dotnet") { WorkingDirectory = owned, RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8 };
+            start.Environment["CoreRepoPath"] = Path.Combine(owned, "nonexistent-core");
+            start.ArgumentList.Add(typeof(Program).Assembly.Location);
+            foreach (string arg in arguments) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start)!;
+            var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); throw; }
+            string text = await stdout + "\n" + await stderr;
+            Assert.True(process.ExitCode == expected, text);
+            return text;
+        }
+        string[] Snapshot(string input) => Directory.GetFileSystemEntries(input, "*", SearchOption.AllDirectories).Order()
+            .Select(p => Path.GetRelativePath(input, p) + (File.Exists(p) ? ":" + BenchmarkResults.Hash(p) + ":" + File.GetLastWriteTimeUtc(p).Ticks : ":directory")).ToArray();
+        foreach (string profile in new[] { "transport-mock", "transport-real" })
+        {
+            string text = await Invoke(0, "--mode", "discover", "--profile", profile, "--output", owned);
+            string input = text.Split('\n').First(l => l.StartsWith("Evidence: "))[10..].Trim();
+            var manifest = ThresholdValidator.Read<RunManifest>(Path.Combine(input, "manifest.json"));
+            Assert.Equal("scenario", manifest.CollectionKind);
+            Assert.Equal(10, ThresholdValidator.Read<RunEvidence>(Path.Combine(input, "case-results.json")).Discovered.Length);
+            string[] before = Snapshot(input);
+            await Invoke(0, "--mode", "discover", "--profile", profile, "--evidence", input, "--output", owned);
+            await Invoke(1, "--mode", "report", "--profile", profile, "--evidence", input, "--output", owned);
+            Assert.Equal(before, Snapshot(input));
+            Assert.Contains("requires --import or --evidence", await Invoke(1, "--mode", "report", "--profile", profile, "--output", owned));
+        }
+        string raw = Path.Combine(owned, "capture");
+        Directory.CreateDirectory(raw);
+        File.WriteAllText(Path.Combine(raw, "collection.json"), "{}");
+        string[] original = Snapshot(raw);
+        foreach (string suffix in new[] { "", "nested/output" })
+        {
+            string text = await Invoke(1, "--mode", "report", "--profile", "transport-real", "--import", raw, "--output", Path.Combine(raw, suffix));
+            Assert.Contains("--output must be outside --import", text);
+            Assert.Equal(original, Snapshot(raw));
+        }
+        Assert.Contains("mutually exclusive", await Invoke(1, "--mode", "report", "--profile", "transport-real", "--import", raw,
+            "--evidence", raw, "--output", raw));
+        Assert.Equal(original, Snapshot(raw));
+        Assert.Contains("--import requires a scenario", await Invoke(1, "--mode", "report", "--profile", "selftest-pass", "--import", raw, "--output", owned));
+        Assert.Contains("--import requires a scenario", await Invoke(1, "--mode", "discover", "--profile", "transport-real", "--import", raw, "--output", owned));
+        foreach (string option in new[] { "filter", "core-repo", "source-project" })
+            Assert.Contains("does not accept BDN", await Invoke(1, "--mode", "discover", "--profile", "transport-real", "--" + option, "unused", "--output", owned));
+    }
+
     [Theory, Trait("Category", "Cli")]
     [InlineData("")]
     [InlineData("nested/output")]
