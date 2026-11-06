@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: GS-SystemAnalyzer/core
-          ref: d825fb7a20c1be86846f7528d1658c52118602d1
+          ref: c600f64e89593b1536a844afbcca35e70316c792
           path: core
       - uses: actions/setup-dotnet@v4
         with:
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: GS-SystemAnalyzer/core
-          ref: d825fb7a20c1be86846f7528d1658c52118602d1
+          ref: c600f64e89593b1536a844afbcca35e70316c792
           path: core
       - uses: actions/setup-dotnet@v4
         with:

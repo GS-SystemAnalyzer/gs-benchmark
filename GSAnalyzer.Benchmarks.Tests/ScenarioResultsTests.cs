@@ -555,6 +555,7 @@ public sealed class TransportImportTests : IDisposable
         string command = $". {Quote(Path.Combine(repository.FullName, "scripts", "run-scenarios.ps1"))} -LibraryOnly; " +
             $"$f = New-Fixture {Quote(owned)} $false; $f | ConvertTo-Json -Depth 32 | Set-Content -Encoding UTF8 {Quote(Path.Combine(root, "fixture.json"))}";
         var start = new ProcessStartInfo("powershell.exe") { RedirectStandardOutput = true, RedirectStandardError = true };
+        start.Environment.Remove("PSModulePath");
         foreach (string arg in new[] { "-NoProfile", "-EncodedCommand", Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command)) }) start.ArgumentList.Add(arg);
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
@@ -718,6 +719,7 @@ public sealed class TransportImportTests : IDisposable
         static string Quote(string value) => "'" + value.Replace("'", "''") + "'";
         string command = $". {Quote(Path.Combine(repository.FullName, "scripts", "run-scenarios.ps1"))} -LibraryOnly; $ownedRoot = {Quote(root)}; " + control;
         var start = new ProcessStartInfo("powershell.exe") { RedirectStandardOutput = true, RedirectStandardError = true };
+        start.Environment.Remove("PSModulePath");
         foreach (string arg in new[] { "-NoProfile", "-EncodedCommand", Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command)) }) start.ArgumentList.Add(arg);
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
